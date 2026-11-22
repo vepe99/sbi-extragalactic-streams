@@ -1,0 +1,37 @@
+[project]
+name = "sbi-extragalactic-streams"
+version = "0.1.0"
+description = "Simulation-based inference of dark-matter halo shapes from extragalactic stellar streams (Chemaly et al. 2026a/b forward model)"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+# Same pins as the PEP 723 header of scripts/extragalactic/generate.py, which stays the reference for the
+# five documented commands (`uv run --script ...` ignores this file). The only difference is CPU-only jax
+# here; `uv sync --extra gpu` adds the CUDA 12 wheels (Linux x86_64 only, about 3 GB).
+dependencies = [
+    "galax==0.1.0",
+    "jax==0.12.1",
+    "xmmutablemap==0.2.2",
+    "unxt==2.2.0",
+    "coordinax==0.24.3",
+    "quax==0.4.6",
+    "quaxed==0.10.7",
+    "equinox==0.13.8",
+    "diffrax==0.7.2",
+    "plum-dispatch==2.10.1",
+    "dataclassish==0.9.2",
+    "jaxtyping==0.3.11",
+    "numpy==2.5.5",
+    "scipy==1.18.1",
+    "h5py==3.16.0",
+    "matplotlib==3.11.2",
+    "astropy==8.0.3",
+    "autocvd==0.2.1",
+    "StreaMAX @ git+https://github.com/David-Chemaly/StreaMAX.git@9fd520ea2904b617c701e1ee5b8740a9a0fd148e",
+]
+
+[project.optional-dependencies]
+gpu = ["jax[cuda12]==0.12.1"]
+
+[tool.uv]
+package = false
+exclude-newer = "2026-11-20T00:00:00Z"

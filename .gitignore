@@ -1,0 +1,14 @@
+# generated data and figures (README.md and report.md next to them are tracked)
+outputs/**/data/
+outputs/**/plots/
+
+# the hand-over archive the repo was created from
+c26_export.tgz
+
+# run logs, environments, caches
+run.log
+nohup.out
+.venv/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
