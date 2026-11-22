@@ -21,7 +21,12 @@ Generated data (`outputs/**/data/`) and figures (`outputs/**/plots/`) are not tr
 ## Decisions
 
 - **STRRINGS sample (2026-11-22, Giuseppe):** NGC1084, NGC1121 and PGC021008 are excluded from every comparison
-  and from inference; 32 of the 35 streams are used. Encoded as `STRRINGS_EXCLUDED` in `analysis/inspect_prior.py`.
+  and from inference; 32 of the 35 streams are used. They are the three streams StreaMAX-fit does not release
+  (dropped by its export script as measurement failures). Encoded as `STRRINGS_EXCLUDED` in
+  `analysis/inspect_prior.py`.
+- **Observed tracks:** the 32 tracks released with [StreaMAX-fit](https://github.com/David-Chemaly/StreaMAX-fit)
+  at commit `2e6a708` (MIT licence). `analysis/inspect_prior.py` fetches them into
+  `outputs/extragalactic/C26_test/data/strrings/` on first use; they are not tracked here.
 
 ## The five commands
 

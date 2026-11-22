@@ -12,7 +12,8 @@ Questions asked of the prior:
   3. maps         where in parameter space the usable streams come from
   4. integrator   where the 99-step leapfrog does not resolve the progenitor orbit
   5. observable   what the network would receive: bins per track, coverage in angle, radial signal against noise
-  6. strrings     the prior predictive against the STRRINGS streams (arXiv:2508.02154, table 4)
+  6. strrings     the prior predictive against the observed STRRINGS tracks (arXiv:2508.02154), binned as the
+                  simulations are; the tracks are the ones released with StreaMAX-fit (fetched on first use)
   7. corner       the prior with and without the unbound draws, pair by pair
   8. neighbours   the simulated tracks closest to each STRRINGS stream, and the parameters they come from
   9. boundness    bound against unbound streams among the usable ones: gallery and track summaries
@@ -23,7 +24,10 @@ corner, neighbours, boundness).
 
 import argparse
 import json
+import shutil
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -37,32 +41,111 @@ C_ALL, C_CUT, C_CLEAN = P.C_ALL, P.C_BOUND, P.C_PASS  # all draws | passing the 
 DE_MAX = 1e-2  # relative energy error above which the progenitor orbit counts as unresolved (report.md)
 NOISE = 0.02  # C26 likelihood: 2 % radial noise per bin
 
-# STRRINGS, arXiv:2508.02154 table 4: (name, distance [Mpc], track length [kpc], width [kpc], angular extent [deg]).
-# Transcribed from the arXiv HTML of the paper; check against the published table before quoting a single row.
-STRRINGS = [
-    ("ESO079-003_GROUP", 38.7, 142.4, 6.1, 110.2), ("ESO298-016", 76.6, 106.2, 10.2, 110.4),
-    ("ESO356-012", 75.2, 55.4, 4.3, 147.1), ("IC0120", 70.9, 165.3, 5.9, 352.7), ("IC1124", 77.3, 45.7, 5.0, 81.2),
-    ("IC1657_GROUP", 52.6, 210.3, 4.5, 274.2), ("NGC0804", 77.5, 468.3, 6.9, 396.6),
-    ("NGC1084_GROUP", 21.0, 293.9, 2.4, 477.7), ("NGC1121", 38.2, 1199.3, 5.4, 713.6),
-    ("NGC1162", 58.0, 248.7, 7.9, 352.7), ("NGC2769", 70.9, 125.8, 10.2, 102.8), ("NGC3041", 20.7, 20.0, 3.4, 51.2),
-    ("NGC4256_GROUP", 37.3, 241.0, 8.8, 299.9), ("NGC4388_GROUP", 37.1, 66.1, 7.2, 109.6),
-    ("NGC4632", 25.4, 33.8, 2.8, 117.2), ("NGC4686", 73.9, 134.7, 8.7, 95.6), ("NGC5055_GROUP", 7.5, 57.8, 2.6, 127.6),
-    ("NGC5263", 71.1, 214.5, 5.4, 286.3), ("NGC5387", 76.8, 24.5, 2.1, 93.0), ("NGC5513_GROUP", 73.8, 106.4, 5.9, 152.2),
-    ("NGC5907", 9.9, 71.7, 4.6, 212.9), ("PGC000902", 79.1, 1151.5, 7.6, 567.5), ("PGC006791", 79.2, 41.6, 4.5, 58.6),
-    ("PGC021008", 83.8, 65.2, 2.3, 331.7), ("PGC039258", 85.1, 82.7, 3.4, 238.6), ("PGC1001085", 80.0, 407.4, 5.4, 426.5),
-    ("PGC1092512", 76.3, 128.8, 5.4, 227.7), ("PGC3092153", 87.8, 44.2, 2.2, 141.9), ("PGC430221", 78.3, 45.9, 4.0, 162.2),
-    ("PGC938075", 1.8, 4.3, 0.1, 404.0), ("UGC01245", 74.8, 86.0, 11.1, 161.1), ("UGC01424", 75.8, 98.0, 2.4, 205.7),
-    ("UGC01970", 28.2, 138.3, 5.8, 227.8), ("UGC08717", 68.6, 333.7, 5.1, 496.8), ("UGC09239", 81.9, 234.4, 8.7, 227.9),
-]  # fmt: skip
-
-
-# Decision of 2026-11-22 (Giuseppe): these three STRRINGS streams are excluded from every comparison and from
-# any later inference. They stay in the table above and are drawn as open grey symbols where the sample is shown.
+# Observed tracks: the 32 STRRINGS streams fitted in Chemaly et al. 2026b, as released with StreaMAX-fit
+# (data/strrings/<name>.npz: theta [rad, unwrapped], r [kpc], r_err [kpc] in 10 deg bins around the host centre).
+STRRINGS_REPO = "https://github.com/David-Chemaly/StreaMAX-fit.git"
+STRRINGS_COMMIT = "2e6a7085c3348cd6963387ab06e2bcbe540b2453"
+# Decision of 2026-11-22 (Giuseppe): NGC1084, NGC1121 and PGC021008 are excluded from every comparison and from
+# any later inference. They are the three of the 35 streams of arXiv:2508.02154 that StreaMAX-fit does not
+# release (its export script drops the tracks flagged as measurement failures), so the 32 files are the sample.
 STRRINGS_EXCLUDED = ("NGC1084_GROUP", "NGC1121", "PGC021008")
-OBS = [row for row in STRRINGS if row[0] not in STRRINGS_EXCLUDED]
-OBS_OUT = [row for row in STRRINGS if row[0] in STRRINGS_EXCLUDED]
-assert len(OBS_OUT) == len(STRRINGS_EXCLUDED)
+# Stream widths [kpc] from table 4 of arXiv:2508.02154, transcribed from the arXiv HTML and not checked against
+# the journal table. Used only for one rug in the bound / unbound comparison.
+STRRINGS_WIDTH_KPC = {
+    "ESO079-003_GROUP": 6.1, "ESO298-016": 10.2, "ESO356-012": 4.3, "IC0120": 5.9, "IC1124": 5.0, "IC1657_GROUP": 4.5,
+    "NGC0804": 6.9, "NGC1162": 7.9, "NGC2769": 10.2, "NGC3041": 3.4, "NGC4256_GROUP": 8.8, "NGC4388_GROUP": 7.2,
+    "NGC4632": 2.8, "NGC4686": 8.7, "NGC5055_GROUP": 2.6, "NGC5263": 5.4, "NGC5387": 2.1, "NGC5513_GROUP": 5.9,
+    "NGC5907": 4.6, "PGC000902": 7.6, "PGC006791": 4.5, "PGC039258": 3.4, "PGC1001085": 5.4, "PGC1092512": 5.4,
+    "PGC3092153": 2.2, "PGC430221": 4.0, "PGC938075": 0.1, "UGC01245": 11.1, "UGC01424": 2.4, "UGC01970": 5.8,
+    "UGC08717": 5.1, "UGC09239": 8.7,
+}  # fmt: skip
 C_OBS = "#eda100"
+N_COVER = 50  # particles a simulated bin needs to be compared with an observed one (coverage rule, data README)
+
+
+def fetch_strrings(dst: Path) -> None:
+    """Copy the released tracks from StreaMAX-fit at the pinned commit into data/strrings/ (not tracked by git)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        git = lambda *a: subprocess.run(["git", "-C", tmp, *a], check=True, capture_output=True)
+        git("init", "-q")
+        git("fetch", "-q", "--depth", "1", STRRINGS_REPO, STRRINGS_COMMIT)
+        git("checkout", "-q", "FETCH_HEAD")
+        dst.mkdir(parents=True, exist_ok=True)
+        for f in sorted(Path(tmp, "data", "strrings").glob("*.npz")):
+            shutil.copy(f, dst / f.name)
+        shutil.copy(Path(tmp, "data", "strrings_fit_settings.csv"), dst / "strrings_fit_settings.csv")
+        shutil.copy(Path(tmp, "LICENSE"), dst / "LICENSE")
+    (dst / "SOURCE.txt").write_text(f"{STRRINGS_REPO} @ {STRRINGS_COMMIT}, data/strrings/\n")
+    print(f"fetched the STRRINGS tracks into {dst}")
+
+
+def load_strrings(obs_dir: Path, cfg: dict) -> list[dict]:
+    """The observed tracks on the grid of the simulated ones.
+
+    Convention of the StreaMAX-fit likelihood: the track is centred on its median angle, which is where the
+    model puts the progenitor (phi = 0). The points are then moved by at most half a bin so that they fall on
+    the centres of the simulation's 10 deg bins. Length, angle and radii are computed exactly as for the
+    simulated tracks (`track_summaries` in generate.py), so the three C26 cuts apply to them unchanged."""
+    if not list(obs_dir.glob("*.npz")):
+        fetch_strrings(obs_dir)
+    bw, pmax = cfg["bin_deg"], cfg["phi_max_deg"]
+    nb = int(round(2 * pmax / bw))
+    obs = []
+    for f in sorted(obs_dir.glob("*.npz")):
+        with np.load(f, allow_pickle=False) as z:
+            th, r, e = np.rad2deg(z["theta"]), z["r"].astype(float), z["r_err"].astype(float)
+        name = f.stem
+        assert name not in STRRINGS_EXCLUDED, name
+        thc = th - np.median(th)
+        res = (thc[0] - bw / 2) % bw  # distance of the points from the bin centres
+        shift = -res if res <= bw / 2 else bw - res
+        thc = thc + shift
+        bins = np.floor((thc + pmax) / bw + 1e-6).astype(int)
+        assert np.allclose((thc + pmax) / bw - bins, 0.5, atol=0.02), f"{name}: points are not on a {bw:g} deg grid"
+        assert len(np.unique(bins)) == len(bins) and bins.min() >= 0 and bins.max() < nb, name
+        adj = np.diff(bins) == 1
+        chord = np.sqrt(np.maximum(r[:-1] ** 2 + r[1:] ** 2 - 2 * r[:-1] * r[1:] * np.cos(np.deg2rad(bw)), 0.0))
+        ang, arc = len(bins) * bw, float(chord[adj].sum())
+        obs.append(dict(
+            name=name, phi=thc, r=r, r_err=e, bins=bins, shift_deg=float(shift), ang_len=float(ang), arc_len=arc,
+            ang_span=float(thc.max() - thc.min() + bw), r_mean=float(r.mean()), r_min=float(r.min()), r_max=float(r.max()),
+            contrast=float((r.max() - r.min()) / r.mean()), frac_err=float(np.median(e / r)),
+            contiguous=bool(adj.all()), width=STRRINGS_WIDTH_KPC.get(name, np.nan),
+            sel_ang=bool(ang > cfg["sel_ang_deg"]), sel_arc=bool(arc > cfg["sel_arc_kpc"]),
+            sel_rad=bool((r.min() >= cfg["sel_r_min"]) & (r.max() <= cfg["sel_r_max"]))))
+    for o in obs:
+        o["sel_all"] = o["sel_ang"] and o["sel_arc"] and o["sel_rad"]
+    assert len(obs) == 32, f"expected the 32 released tracks, found {len(obs)}"
+    return obs
+
+
+def load_sim_tracks(d: P.Data) -> dict:
+    """count, median radius and 16-84 half-width per bin (the statistics the StreaMAX-fit likelihood uses)."""
+    import h5py
+
+    cols: dict[str, list] = {}
+    for f in sorted(d.ddir.glob("shard_*.h5")):
+        with h5py.File(f, "r") as h:
+            cols.setdefault("index", []).append(h["index"][:])
+            for k in ("count", "r_med", "r_hw"):
+                cols.setdefault(k, []).append(h["track"][k][:])
+    t = {k: np.concatenate(v) for k, v in cols.items()}
+    o = np.argsort(t["index"])
+    return {k: v[o] for k, v in t.items()}
+
+
+def track_distance(sim: dict, o: dict, pool: np.ndarray, nb: int):
+    """Root-mean-square fractional difference between each simulated track and the observed one over the
+    observed bins, for the simulation as it is and for its mirror image (phi -> -phi: the sense of rotation of
+    an observed stream is not known). inf where a bin has fewer than N_COVER particles."""
+    out = []
+    for bins in (o["bins"], nb - 1 - o["bins"]):
+        ok = pool & (sim["count"][:, bins] >= N_COVER).all(1)
+        dist = np.full(len(pool), np.inf)
+        dist[ok] = np.sqrt(np.mean((sim["r_med"][ok][:, bins].astype(np.float64) / o["r"] - 1.0) ** 2, axis=1))
+        out.append(dist)
+    mirrored = out[1] < out[0]
+    return np.minimum(out[0], out[1]), mirrored
 
 
 def binned_fraction(x, mask, edges):
@@ -100,7 +183,7 @@ def load(d: P.Data) -> dict:
              resolved=resolved, bound=a["bound"])
     derived = dict(r0=np.linalg.norm(x0, axis=1), speed=np.linalg.norm(v0, axis=1), cos_nL=cos_nL,
                    vr_frac=vr / np.linalg.norm(v0, axis=1))
-    return dict(a=a, th=th, m=m, derived=derived)
+    return dict(a=a, th=th, m=m, derived=derived, obs=load_strrings(d.obs_dir, d.cfg))
 
 
 # ------------------------------------------------------------------------------------------------------
@@ -286,11 +369,11 @@ def fig_integrator(d, s, out) -> None:
         ax.fill_between(ctr, f - e, f + e, color=col, alpha=0.22, lw=0)
         ax.plot(ctr, f, color=col, lw=2.0, label=lbl)
         by_ang[key] = [None if not np.isfinite(v) else float(v) for v in f]
-    o_ang = np.array([row[4] for row in OBS])
+    o_ang = np.array([o["ang_len"] for o in s["obs"]])
     ax.plot(np.clip(o_ang, 0, 535), np.full(len(o_ang), 0.03), "|", ms=14, mew=1.6, color=P.INK,
-            label=f"STRRINGS angular extents ({len(OBS)})")
+            label=f"STRRINGS angular lengths ({len(o_ang)})")
     ax.set_ylim(0, 1)
-    ax.set_xlabel("angular length of the track [deg]  (observed values above 540 drawn at the edge)")
+    ax.set_xlabel("angular length of the track [deg]")
     ax.set_ylabel("fraction with energy error > 1 %")
     ax.legend(loc="upper left")
     fig.suptitle("Where the 99-step leapfrog does not resolve the progenitor orbit", fontsize=10.5)
@@ -371,83 +454,87 @@ def fig_observable(d, s, out) -> None:
 
 
 def fig_strrings(d, s, out) -> None:
-    a, m = s["a"], s["m"]
-    obs = np.array([row[1:] for row in OBS])
-    o_len, o_ang = obs[:, 1], obs[:, 3]
-    out_len, out_ang = np.array([r[2] for r in OBS_OUT]), np.array([r[4] for r in OBS_OUT])
-    o_rad = o_len / np.deg2rad(o_ang)  # radius of the circular arc with that length and angle
+    a, m, obs = s["a"], s["m"], s["obs"]
+    sim = s.setdefault("sim", load_sim_tracks(d))
+    nb = sim["count"].shape[1]
+    o_len, o_ang = np.array([o["arc_len"] for o in obs]), np.array([o["ang_len"] for o in obs])
+    o_rad = np.array([o["r_mean"] for o in obs])
+    o_pass = np.array([o["sel_all"] for o in obs])
     has = m["has_bin"]
-    sim_rad = a["arc_len_kpc"] / np.deg2rad(np.maximum(a["ang_len_deg"], 1e-6))
-    fig, axes = plt.subplots(1, 3, figsize=(17, 4.8))
+    fig, axes = plt.subplots(1, 3, figsize=(17.5, 5.6), gridspec_kw=dict(width_ratios=[1.1, 1, 1.15]))
     ax = axes[0]
-    ex, ey = np.linspace(0, 720, 37), np.logspace(0, 3.6, 37)
+    ex, ey = np.linspace(0, 540, 28), np.logspace(0, 3.6, 37)
     h, _, _ = np.histogram2d(a["ang_len_deg"][has], np.clip(a["arc_len_kpc"][has], 1, None), bins=[ex, ey])
     im = ax.pcolormesh(ex, ey, np.where(h > 0, h, np.nan).T, cmap=P.SEQ, norm=plt.matplotlib.colors.LogNorm(vmin=1, vmax=h.max()))
-    ax.plot(o_ang, o_len, "o", ms=6.5, color=P.INK, mfc=C_OBS, mew=1.0, ls="none", label=f"STRRINGS ({len(OBS)} streams)")
-    ax.plot(out_ang, out_len, "o", ms=6.5, color=P.INK2, mfc="none", mew=1.0, ls="none", label=f"excluded ({len(OBS_OUT)})")
+    ax.plot(o_ang[o_pass], o_len[o_pass], "o", ms=6.5, color=P.INK, mfc=C_OBS, mew=1.0, ls="none",
+            label=f"STRRINGS, passes the three cuts ({int(o_pass.sum())})")
+    ax.plot(o_ang[~o_pass], o_len[~o_pass], "o", ms=6.5, color=P.INK, mfc=P.SURFACE, mew=1.0, ls="none",
+            label=f"STRRINGS, fails a cut ({int((~o_pass).sum())})")
     ax.axvline(d.cfg["sel_ang_deg"], color=P.INK2, lw=1.0, ls=":")
     ax.axhline(d.cfg["sel_arc_kpc"], color=P.INK2, lw=1.0, ls=":")
     ax.set_yscale("log")
     ax.grid(False)
-    ax.set_xlabel("angular length [deg]  (simulation: valid bins x 10 deg)")
+    ax.set_xlabel("angular length [deg]  (bins x 10 deg)")
     ax.set_ylabel("track length [kpc]")
     ax.legend(loc="lower right")
     fig.colorbar(im, ax=ax, label="prior draws with a valid bin", pad=0.02)
     ax.set_title("Length against angle (dotted: the C26 cuts)")
     ax = axes[1]
-    bins = np.logspace(0, 3.2, 49)
+    bins = np.logspace(-0.5, 3.2, 53)
     for key, col, lbl in (("has_bin", C_ALL, "all draws with a valid bin"), ("cut", C_CUT, "passing the three cuts"),
                           ("clean", C_CLEAN, "cuts + resolved orbit")):
-        x = np.clip(sim_rad[m[key]], bins[0], bins[-1])
+        x = np.clip(a["r_track_mean"][m[key]], bins[0], bins[-1])
         hh, e = np.histogram(x, bins=bins, weights=np.full(len(x), 1.0 / max(len(x), 1)))
         ax.stairs(hh, e, color=col, lw=2.0, label=lbl)
-    ymax = ax.get_ylim()[1]
-    ax.plot(o_rad, np.full(len(o_rad), 0.04 * ymax), "|", ms=16, mew=1.6, color=P.INK, label=f"STRRINGS ({len(OBS)} streams)")
+    ax.plot(o_rad, np.full(len(o_rad), 0.04 * ax.get_ylim()[1]), "|", ms=16, mew=1.6, color=P.INK, label=f"STRRINGS ({len(obs)})")
     ax.set_xscale("log")
-    ax.set_xlabel("characteristic radius = track length / angle [kpc]")
+    ax.set_xlabel("mean radius of the track [kpc]")
     ax.set_ylabel("fraction of the group")
     ax.legend(loc="upper left")
     ax.set_title("Size of the streams")
+    # --- how many simulations can be compared with each observed track, and how many resemble it
     ax = axes[2]
-    # simulations in the neighbourhood of each observed stream (0.2 dex in length, 30 deg in angle): among every
-    # draw with a resolved orbit (no cut), and among those that also pass the three C26 cuts
-    cl, res = m["clean"], m["resolved"] & has
-    la, aa = np.log10(np.clip(a["arc_len_kpc"], 1e-3, None)), a["ang_len_deg"]
-    box = [(np.abs(la - np.log10(L)) < 0.2) & (np.abs(aa - A) < 30) for L, A in zip(o_len, o_ang)]
-    near = np.array([int((b & cl).sum()) for b in box])
-    near_res = np.array([int((b & res).sum()) for b in box])
-    fails = ~((o_ang > d.cfg["sel_ang_deg"]) & (o_len > d.cfg["sel_arc_kpc"]))
-    order = np.lexsort((near, near_res))
-    yy = np.arange(len(near))
-    ax.barh(yy, np.maximum(near_res[order], 0.5), height=0.7, color=C_ALL, label="resolved orbit, no cut")
-    ax.plot(np.maximum(near[order], 0.5), yy, "o", ms=5, color=C_CLEAN, mec=P.SURFACE, mew=0.8, ls="none",
-            label="resolved orbit + the three cuts")
-    ax.set_yticks(yy, [OBS[i][0] + (" *" if fails[i] else "") for i in order], fontsize=6.5)
+    pool = m["has_bin"] & m["resolved"]
+    rows = []
+    for o in obs:
+        dist, _ = track_distance(sim, o, pool, nb)
+        rows.append((o["name"], int(np.isfinite(dist).sum()), int((dist < 0.2).sum()), int((dist < 0.1).sum()), float(dist.min())))
+    order = sorted(range(len(rows)), key=lambda i: (rows[i][3], rows[i][2], rows[i][1]))
+    yy = np.arange(len(rows))
+    z = lambda v: np.maximum(np.array(v, float), 0.5)
+    ax.barh(yy, z([rows[i][1] for i in order]), height=0.72, color=C_ALL, alpha=0.35, label="cover every observed bin")
+    ax.barh(yy, z([rows[i][2] for i in order]), height=0.72, color=C_ALL, label="and within 20 % rms in radius")
+    ax.plot(z([rows[i][3] for i in order]), yy, "o", ms=5, color=C_CLEAN, mec=P.SURFACE, mew=0.8, ls="none", label="within 10 % rms")
+    ax.set_yticks(yy, [rows[i][0] + (" *" if not obs[i]["sel_all"] else "") for i in order], fontsize=6.5)
     ax.set_xscale("log")
     ax.grid(axis="y", visible=False)
     ax.legend(loc="lower right")
-    ax.set_xlabel("simulations within 0.2 dex in length and 30 deg in angle (0 drawn at 0.5)\n"
-                  "* observed stream below the C26 length or angle cut")
-    ax.set_title(f"Training examples near each observed stream (of {len(la):,} draws)")
-    fig.suptitle("Prior predictive against the STRRINGS sample (arXiv:2508.02154, table 4); lengths are measured "
-                 "differently in data and simulation, so this is an order-of-magnitude comparison", fontsize=10.5)
+    ax.set_xlabel(f"simulations with a resolved orbit, of {int(pool.sum()):,} (0 drawn at 0.5)\n* observed track fails a C26 cut")
+    ax.set_title("Simulated tracks comparable with each observed one")
+    fig.suptitle(f"Prior predictive against the {len(obs)} observed STRRINGS tracks (StreaMAX-fit release), measured on the same "
+                 "10 deg bins as the simulations", fontsize=10.5)
     fig.tight_layout()
     P.save(fig, d, "prior_inspection/strrings")
     pct = lambda x: dict(zip(("p5", "p16", "p50", "p84", "p95"), [float(v) for v in np.nanpercentile(x, [5, 16, 50, 84, 95])]))
+    cl = m["clean"]
     out["strrings"] = dict(
-        n=len(OBS), excluded=list(STRRINGS_EXCLUDED),
-        obs_longer_than_270deg=int((o_ang > 270).sum()),
-        obs_pass_ang_cut=int((o_ang > d.cfg["sel_ang_deg"]).sum()), obs_pass_arc_cut=int((o_len > d.cfg["sel_arc_kpc"]).sum()),
-        obs_pass_both=int(((o_ang > d.cfg["sel_ang_deg"]) & (o_len > d.cfg["sel_arc_kpc"])).sum()),
-        obs_char_radius_kpc=pct(o_rad), sim_char_radius_kpc_cut=pct(sim_rad[m["cut"]]), sim_char_radius_kpc_clean=pct(sim_rad[cl]),
-        sim_r_track_mean_kpc_clean=pct(a["r_track_mean"][cl]),
-        frac_clean_char_radius_below_60=float((sim_rad[cl] < 60).mean()),
-        frac_hasbin_char_radius_below_60=float((sim_rad[has] < 60).mean()),
-        neighbours_per_observed_stream={r[0]: dict(resolved_no_cut=int(v0), resolved_and_cuts=int(v1), fails_c26_cuts=bool(f))
-                                        for r, v0, v1, f in zip(OBS, near_res, near, fails)},
-        neighbours_median=dict(resolved_no_cut=float(np.median(near_res)), resolved_and_cuts=float(np.median(near))),
-        n_observed_with_fewer_than_100_neighbours=dict(resolved_no_cut=int((near_res < 100).sum()), resolved_and_cuts=int((near < 100).sum())),
-        n_observed_with_no_neighbour=dict(resolved_no_cut=int((near_res == 0).sum()), resolved_and_cuts=int((near == 0).sum())))
+        n=len(obs), excluded=list(STRRINGS_EXCLUDED), source=f"{STRRINGS_REPO} @ {STRRINGS_COMMIT[:7]}",
+        obs_pass=dict(ang=int(sum(o["sel_ang"] for o in obs)), arc=int(sum(o["sel_arc"] for o in obs)),
+                      rad=int(sum(o["sel_rad"] for o in obs)), all=int(o_pass.sum())),
+        obs_fail_names=dict(ang=[o["name"] for o in obs if not o["sel_ang"]], arc=[o["name"] for o in obs if not o["sel_arc"]],
+                            rad=[o["name"] for o in obs if not o["sel_rad"]]),
+        obs_longer_than_270deg=int((o_ang > 270).sum()), obs_contiguous=int(sum(o["contiguous"] for o in obs)),
+        obs_ang_len_deg=pct(o_ang), obs_arc_len_kpc=pct(o_len), obs_r_mean_kpc=pct(o_rad),
+        obs_radial_contrast=pct([o["contrast"] for o in obs]), obs_frac_err=pct([o["frac_err"] for o in obs]),
+        sim_r_track_mean_kpc=dict(all=pct(a["r_track_mean"][has]), cut=pct(a["r_track_mean"][m["cut"]]), clean=pct(a["r_track_mean"][cl])),
+        frac_sim_r_mean_below_obs_p95=dict(all=float((a["r_track_mean"][has] < np.percentile(o_rad, 95)).mean()),
+                                           clean=float((a["r_track_mean"][cl] < np.percentile(o_rad, 95)).mean())),
+        frac_sim_cut_longer_than_270deg=float((a["ang_len_deg"][m["cut"]] > 270).mean()),
+        per_stream={r_[0]: dict(n_bins=len(o["bins"]), ang_len_deg=o["ang_len"], arc_len_kpc=o["arc_len"], r_mean_kpc=o["r_mean"],
+                                passes_c26_cuts=o["sel_all"], n_covering=r_[1], n_within_20pct=r_[2], n_within_10pct=r_[3],
+                                best_rms=r_[4]) for r_, o in zip(rows, obs)},
+        n_streams_without_sim_within_10pct=int(sum(r_[3] == 0 for r_ in rows)),
+        n_streams_with_fewer_than_100_within_20pct=int(sum(r_[2] < 100 for r_ in rows)))
 
 
 # ------------------------------------------------------------------------------------------------------
@@ -528,89 +615,90 @@ def fig_corner(d, s, out) -> None:
 # ------------------------------------------------------------------------------------------------------
 # 8. nearest simulated neighbours of the STRRINGS streams
 # ------------------------------------------------------------------------------------------------------
-def neighbour_pool(s):
-    """Simulated tracks an observed stream can be compared with: a resolved orbit and one unbroken run of valid
-    bins (an observed track is one piece). No C26 cut, since half of the observed streams fail the length cut."""
-    a, m = s["a"], s["m"]
-    return m["has_bin"] & m["resolved"] & a["contiguous"].astype(bool)
-
-
-def neighbour_distance(a, length, angle):
-    """Distance in (length, angle): 0.2 dex in length counts as much as 30 deg in angle."""
-    la = np.log10(np.clip(a["arc_len_kpc"], 1e-3, None))
-    return np.hypot((la - np.log10(length)) / 0.2, (a["ang_len_deg"] - angle) / 30.0)
-
-
-def draw_track(ax, d, t, row, col) -> float:
-    """One binned track on the sky: mean radius of the valid bins, with the radial spread as a band. The
-    progenitor sits on the +x axis at phi = 0. Returns the largest radius drawn."""
-    valid = t["count"][row] >= d.cfg["n_valid_min"]
-    phi = np.deg2rad(d.phi[valid])
-    r, w = t["r_mean"][row][valid].astype(float), t["r_std"][row][valid].astype(float)
-    lo, hi = np.maximum(r - w, 0.0), r + w
-    ax.fill(np.concatenate([hi * np.cos(phi), (lo * np.cos(phi))[::-1]]),
-            np.concatenate([hi * np.sin(phi), (lo * np.sin(phi))[::-1]]), color=col, alpha=0.25, lw=0)
-    ax.plot(r * np.cos(phi), r * np.sin(phi), "-", color=col, lw=1.6)
-    i0 = int(np.argmin(np.abs(phi)))
-    ax.plot([r[i0] * np.cos(phi[i0])], [r[i0] * np.sin(phi[i0])], marker="*", ms=8, color=P.INK, mfc=C_OBS, mew=0.6, ls="none")
-    return float(hi.max())
+def draw_sim_track(ax, d, sim, row, col, mirrored: bool) -> None:
+    """A simulated track on the sky: median radius of the bins with at least N_COVER particles, with the 16-84
+    half-width as a band; drawn mirrored (y -> -y) where the mirror image is the better match."""
+    ok = sim["count"][row] >= N_COVER
+    phi = np.deg2rad(d.phi[ok]) * (-1.0 if mirrored else 1.0)
+    r, w = sim["r_med"][row][ok].astype(float), sim["r_hw"][row][ok].astype(float)
+    brk = np.nonzero(np.diff(np.nonzero(ok)[0]) > 1)[0] + 1  # do not join across gaps in the track
+    for seg in np.split(np.arange(len(r)), brk):
+        if len(seg) == 0:
+            continue
+        lo, hi, ph = np.maximum(r[seg] - w[seg], 0.0), r[seg] + w[seg], phi[seg]
+        ax.fill(np.concatenate([hi * np.cos(ph), (lo * np.cos(ph))[::-1]]),
+                np.concatenate([hi * np.sin(ph), (lo * np.sin(ph))[::-1]]), color=col, alpha=0.25, lw=0)
+        ax.plot(r[seg] * np.cos(ph), r[seg] * np.sin(ph), "-", color=col, lw=1.5)
 
 
 def fig_neighbours(d, s, out, k: int = 5, per_page: int = 8) -> None:
-    a, th, t, m = s["a"], s["th"], d.tracks, s["m"]
-    pool = neighbour_pool(s)
-    pool_idx = np.nonzero(pool)[0]
-    obs = sorted(OBS, key=lambda r: r[4])  # by angular extent: short arcs first, loops last
-    info = {}
+    a, th, m, obs_all = s["a"], s["th"], s["m"], s["obs"]
+    sim = s.setdefault("sim", load_sim_tracks(d))
+    nb = sim["count"].shape[1]
+    pool = m["has_bin"] & m["resolved"]
+    obs = sorted(obs_all, key=lambda o: o["ang_len"])  # short arcs first, loops last
+    info, pick = {}, []
     pages = [obs[i : i + per_page] for i in range(0, len(obs), per_page)]
     for ip, page in enumerate(pages, 1):
-        fig, axes = plt.subplots(len(page), k + 1, figsize=(2.45 * (k + 1), 2.6 * len(page)), squeeze=False)
-        for i, (name, dist, L, W, A) in enumerate(page):
-            dd = neighbour_distance(a, L, A)[pool_idx]
-            order = np.argsort(dd)[:k]
-            rows, dist_k = pool_idx[order], dd[order]
-            info[name] = dict(length_kpc=L, angle_deg=A, neighbours=[int(a["index"][r]) for r in rows],
-                              distance=[float(x) for x in dist_k], bound=[bool(m["bound"][r]) for r in rows],
-                              n_within_1=int((dd < 1).sum()))
-            # the observed stream as the circular arc with its length and angle (its image is not in this repo)
+        fig, axes = plt.subplots(len(page), k + 1, figsize=(2.5 * (k + 1) + 1.0, 2.65 * len(page)), squeeze=False,
+                                 gridspec_kw=dict(width_ratios=[1.45] + [1] * k))
+        for i, o in enumerate(page):
+            dist, mirrored = track_distance(sim, o, pool, nb)
+            order = np.argsort(dist)[:k]
+            order = order[np.isfinite(dist[order])]
+            near = np.argsort(dist)[:100]
+            pick.append(near[dist[near] < 0.2])
+            info[o["name"]] = dict(
+                n_bins=len(o["bins"]), n_covering=int(np.isfinite(dist).sum()), n_within_20pct=int((dist < 0.2).sum()),
+                n_within_10pct=int((dist < 0.1).sum()), neighbours=[int(a["index"][r_]) for r_ in order],
+                rms=[float(dist[r_]) for r_ in order], mirrored=[bool(mirrored[r_]) for r_ in order],
+                bound=[bool(m["bound"][r_]) for r_ in order])
+            # --- the radial bins: observed points with their errors, and the neighbours on the same bins
             ax = axes[i, 0]
-            R = L / np.deg2rad(A)
-            ph = np.deg2rad(np.linspace(-A / 2, A / 2, 400))
-            rr = R * (1 + 0.04 * (ph - ph.min()) / (2 * np.pi))  # a slight spiral so that loops stay visible
-            ax.plot(rr * np.cos(ph), rr * np.sin(ph), color=P.INK, lw=max(1.2, 1.6))
-            lim = 1.1 * R
-            for jn, (r_, dk) in enumerate(zip(rows, dist_k), 1):
-                col = C_CUT if m["bound"][r_] else C_ALL
-                lim = max(lim, 1.08 * draw_track(axes[i, jn], d, t, r_, col))
-                axes[i, jn].set_title(f"#{int(a['index'][r_])}  d={dk:.2f}  {'bound' if m['bound'][r_] else 'unbound'}\n"
-                                      f"L={a['arc_len_kpc'][r_]:.0f} kpc, {a['ang_len_deg'][r_]:.0f}$^\\circ$, "
-                                      f"q={th[r_, 2]:.2f}, log M={th[r_, 0]:.1f}", fontsize=6.8)
-            ax.set_title(f"{name}\nL={L:.0f} kpc, {A:.0f}$^\\circ$, R={R:.0f} kpc  ({info[name]['n_within_1']:,} sims with d<1)",
+            for r_ in order:
+                bins = (nb - 1 - o["bins"]) if mirrored[r_] else o["bins"]
+                ax.plot(o["phi"], sim["r_med"][r_][bins], "-", color=C_CUT if m["bound"][r_] else C_ALL, lw=1.3, alpha=0.85)
+            ax.errorbar(o["phi"], o["r"], yerr=o["r_err"], fmt="o", ms=3.2, color=P.INK, mfc=P.SURFACE, mew=0.9, elinewidth=0.9, zorder=5)
+            ax.set_ylim(0, 1.25 * max(o["r_max"], max((float(sim["r_med"][r_][o["bins"]].max()) for r_ in order), default=0.0)))
+            ax.set_xlabel(r"$\phi$ [deg], 0 at the median angle", fontsize=7)
+            ax.set_ylabel("r [kpc]", fontsize=7)
+            ax.tick_params(labelsize=6)
+            ax.set_title(f"{o['name']}{'' if o['sel_all'] else ' *'}: {len(o['bins'])} bins, median error {100 * o['frac_err']:.1f} %\n"
+                         f"{info[o['name']]['n_covering']:,} sims cover it, {info[o['name']]['n_within_10pct']:,} within 10 % rms",
                          fontsize=6.8)
-            for ax in axes[i]:
+            # --- the same on the sky
+            lim = 1.35 * o["r_max"]
+            ox, oy = o["r"] * np.cos(np.deg2rad(o["phi"])), o["r"] * np.sin(np.deg2rad(o["phi"]))
+            for jn in range(1, k + 1):
+                ax = axes[i, jn]
+                if jn > len(order):
+                    ax.axis("off")
+                    continue
+                r_ = order[jn - 1]
+                draw_sim_track(ax, d, sim, r_, C_CUT if m["bound"][r_] else C_ALL, bool(mirrored[r_]))
+                ax.plot(ox, oy, "o", ms=2.6, color=P.INK, mfc=P.INK, ls="none", zorder=5)
                 ax.plot([0], [0], marker="+", ms=6, color=P.INK2)
                 ax.set_xlim(-lim, lim)
                 ax.set_ylim(-lim, lim)
                 ax.set_aspect("equal")
                 ax.tick_params(labelsize=6)
-        h = [plt.Line2D([], [], color=P.INK, lw=1.6, label="observed: circular arc with the stream's length and angle"),
-             plt.Line2D([], [], color=C_CUT, lw=1.6, label="simulated track, bound progenitor (band: radial spread)"),
-             plt.Line2D([], [], color=C_ALL, lw=1.6, label="simulated track, unbound progenitor"),
-             plt.Line2D([], [], marker="*", ms=9, color=P.INK, mfc=C_OBS, ls="none", label="progenitor today")]
-        fig.legend(handles=h, loc="upper center", ncol=4, bbox_to_anchor=(0.5, 0.995), fontsize=8)
-        fig.suptitle(f"Nearest simulated tracks to each STRRINGS stream in (length, angle); axes in kpc, one scale per row "
-                     f"(page {ip} of {len(pages)})", y=1.012, fontsize=9.5)
+                ax.set_title(f"#{int(a['index'][r_])}  rms {100 * dist[r_]:.1f} %  {'bound' if m['bound'][r_] else 'unbound'}"
+                             f"{', mirrored' if mirrored[r_] else ''}\nq={th[r_, 2]:.2f}, log M={th[r_, 0]:.1f}, "
+                             f"t={th[r_, 12]:.1f} Gyr", fontsize=6.8)
+        h = [plt.Line2D([], [], marker="o", ms=4, color=P.INK, mfc=P.SURFACE, ls="none", label="observed radial bins (with errors in the first column)"),
+             plt.Line2D([], [], color=C_CUT, lw=1.6, label="simulated track, bound progenitor (band: 16-84 half-width)"),
+             plt.Line2D([], [], color=C_ALL, lw=1.6, label="simulated track, unbound progenitor")]
+        fig.legend(handles=h, loc="upper center", ncol=3, bbox_to_anchor=(0.5, 0.995), fontsize=8)
+        fig.suptitle(f"The {k} simulated tracks closest to each observed STRRINGS track on its own radial bins; sky panels in kpc "
+                     f"(page {ip} of {len(pages)}; * fails a C26 cut)", y=1.012, fontsize=9.5)
         fig.tight_layout(rect=(0, 0, 1, 0.985))
         P.save(fig, d, f"prior_inspection/strrings_neighbours_p{ip}")
-    out["strrings_neighbours"] = dict(pool="resolved orbit, contiguous valid bins, no C26 cut", pool_size=int(pool.sum()),
-                                      metric="hypot(dlog10(length)/0.2, dangle/30 deg)", per_stream=info)
+    out["strrings_neighbours"] = dict(
+        pool="resolved orbit; every observed bin has at least 50 particles; simulation or its mirror image",
+        pool_size=int(pool.sum()), metric="rms of r_sim / r_obs - 1 over the observed bins, track centred on its median angle",
+        per_stream=info)
 
-    # --- where in the prior do the neighbours come from: up to 100 per observed stream, all within d < 1
-    pick = []
-    for name, dist, L, W, A in obs:
-        dd = neighbour_distance(a, L, A)[pool_idx]
-        o = np.argsort(dd)[:100]
-        pick.append(pool_idx[o[dd[o] < 1]])
+    # --- where in the prior the neighbours come from: up to 100 per observed stream, all within 20 % rms
     pick = np.concatenate(pick)
     dv = s["derived"]
     cols = [th[:, i] for i in range(13)] + [dv["r0"], dv["speed"], a["n_peri"].astype(float)]
@@ -623,10 +711,10 @@ def fig_neighbours(d, s, out, k: int = 5, per_page: int = 8) -> None:
         if (x.max() - x.min()) < 1.25 * (hi - lo):
             lo, hi = x.min(), x.max()
         e = np.arange(-0.5, 8.5) if name == "n_peri" else np.linspace(lo, hi, 31)
-        for xx, col, lbl in ((x, C_ALL, f"all prior draws ({len(x):,})"), (x[pool], P.INK2, f"comparison pool ({int(pool.sum()):,})"),
-                             (x[pick], C_CLEAN, f"neighbours of the {len(obs)} STRRINGS streams ({len(pick):,})")):
+        for xx, col, lbl in ((x, C_ALL, f"all prior draws ({len(x):,})"),
+                             (x[pick], C_CLEAN, f"neighbours of the {len(obs)} STRRINGS tracks ({len(pick):,})")):
             hh, _ = np.histogram(np.clip(xx, e[0], e[-1]), bins=e, density=True)
-            ax.stairs(hh, e, color=col, lw=1.2 if col == P.INK2 else 1.9, ls=":" if col == P.INK2 else "-", label=lbl)
+            ax.stairs(hh, e, color=col, lw=1.9, label=lbl)
         sel = np.zeros(len(x), bool)
         sel[np.unique(pick)] = True
         ksn[name] = ks_distance(x, sel)
@@ -635,8 +723,8 @@ def fig_neighbours(d, s, out, k: int = 5, per_page: int = 8) -> None:
         ax.set_xlabel(lab)
         ax.set_yticks([])
         ax.grid(False)
-    fig.legend(*axes[0, 0].get_legend_handles_labels(), loc="upper center", ncol=3, bbox_to_anchor=(0.5, 0.985))
-    fig.suptitle("Where in the prior the STRRINGS-like tracks come from (up to 100 nearest per observed stream, d < 1; "
+    fig.legend(*axes[0, 0].get_legend_handles_labels(), loc="upper center", ncol=2, bbox_to_anchor=(0.5, 0.985))
+    fig.suptitle("Where in the prior the STRRINGS-like tracks come from (up to 100 nearest per observed track, within 20 % rms; "
                  "KS against the full prior)", y=1.0, fontsize=10.5)
     fig.tight_layout(rect=(0, 0, 1, 0.965))
     P.save(fig, d, "prior_inspection/strrings_neighbour_parameters")
@@ -645,7 +733,9 @@ def fig_neighbours(d, s, out, k: int = 5, per_page: int = 8) -> None:
         pass_c26_cuts_frac=float(m["cut"][pick].mean()), ks_vs_prior=ksn,
         median=dict(log10_M_halo=float(np.median(th[pick, 0])), q=float(np.median(th[pick, 2])),
                     r0_kpc=float(np.median(dv["r0"][pick])), speed_kms=float(np.median(dv["speed"][pick])),
-                    x0_kpc=float(np.median(th[pick, 7])), t_int=float(np.median(th[pick, 12]))))
+                    x0_kpc=float(np.median(th[pick, 7])), t_int=float(np.median(th[pick, 12]))),
+        prior_median=dict(log10_M_halo=float(np.median(th[:, 0])), r0_kpc=float(np.median(dv["r0"])),
+                          x0_kpc=float(np.median(th[:, 7])), t_int=float(np.median(th[:, 12]))))
 
 
 # ------------------------------------------------------------------------------------------------------
@@ -681,13 +771,15 @@ def fig_boundness(d, s, out, n_show: int = 12, seed: int = 1) -> None:
     with np.errstate(all="ignore"):
         contrast = (np.nanmax(r, 1) - np.nanmin(r, 1)) / np.nanmean(r, 1)
         relw = np.nanmedian(np.where(valid, t["r_std"] / t["r_mean"], np.nan), 1)
-        char_r = a["arc_len_kpc"] / np.deg2rad(np.maximum(a["ang_len_deg"], 1e-6))
-    o = np.array([row[1:] for row in OBS])
-    specs = [("angular length [deg]", a["ang_len_deg"], np.arange(90, 420, 10), False, o[:, 3]),
-             ("track length [kpc]", a["arc_len_kpc"], np.logspace(1.2, 3.3, 43), True, o[:, 1]),
-             ("characteristic radius = length / angle [kpc]", char_r, np.logspace(1, 2.8, 43), True, o[:, 1] / np.deg2rad(o[:, 3])),
-             (r"relative width, median $r_{\rm std}/r$", relw, np.logspace(-2, 0.2, 43), True, o[:, 2] / (o[:, 1] / np.deg2rad(o[:, 3]))),
-             (r"radial contrast $(r_{\max}-r_{\min})/\bar r$", contrast, np.logspace(-1, 0.8, 43), True, None),
+        char_r = a["r_track_mean"]
+    ob = s["obs"]
+    og = lambda key: np.array([o[key] for o in ob])
+    specs = [("angular length [deg]", a["ang_len_deg"], np.arange(60, 500, 10), False, og("ang_len")),
+             ("track length [kpc]", a["arc_len_kpc"], np.logspace(0.3, 3.3, 49), True, og("arc_len")),
+             ("mean radius of the track [kpc]", char_r, np.logspace(-0.5, 2.8, 49), True, og("r_mean")),
+             (r"relative width, median $r_{\rm std}/r$  (observed: table width / mean radius)", relw, np.logspace(-2, 0.2, 43), True,
+              og("width") / og("r_mean")),
+             (r"radial contrast $(r_{\max}-r_{\min})/\bar r$", contrast, np.logspace(-1, 0.8, 43), True, og("contrast")),
              (r"pericentres within $t_{\rm int}$", a["n_peri"].astype(float), np.arange(-0.5, 9.5), False, None)]
     fig, axes = plt.subplots(2, 3, figsize=(15.5, 8))
     stats = {}
@@ -699,7 +791,7 @@ def fig_boundness(d, s, out, n_show: int = 12, seed: int = 1) -> None:
             stats.setdefault(lab, {})[name] = [float(v) for v in np.nanpercentile(x[mask], [16, 50, 84])]
         if rug is not None:
             ax.plot(np.clip(rug, bins[0], bins[-1]), np.full(len(rug), 0.035 * ax.get_ylim()[1]), "|", ms=13, mew=1.5,
-                    color=P.INK, label=f"STRRINGS ({len(OBS)})")
+                    color=P.INK, label=f"STRRINGS ({len(ob)})")
         if logx:
             ax.set_xscale("log")
         ax.set_xlabel(lab + "   (range clipped)")
@@ -713,7 +805,7 @@ def fig_boundness(d, s, out, n_show: int = 12, seed: int = 1) -> None:
         n=dict(bound=int(groups[0][1].sum()), unbound=int(groups[1][1].sum())), p16_p50_p84=stats,
         contiguous_frac={n_: float(a["contiguous"][mk].mean()) for n_, mk, _ in groups},
         frac_longer_than_180deg={n_: float((a["ang_len_deg"][mk] > 180).mean()) for n_, mk, _ in groups},
-        frac_char_radius_below_60kpc={n_: float((char_r[mk] < 60).mean()) for n_, mk, _ in groups},
+        frac_mean_radius_below_60kpc={n_: float((char_r[mk] < 60).mean()) for n_, mk, _ in groups},
         no_pericentre_frac={n_: float((a["n_peri"][mk] == 0).mean()) for n_, mk, _ in groups},
         q_mean={n_: float(q[mk].mean()) for n_, mk, _ in groups})
 
@@ -726,6 +818,8 @@ def main() -> None:
     arg = ap.parse_args()
     d = P.Data(REPO / arg.out, arg.subdir)
     (d.pdir / "prior_inspection").mkdir(parents=True, exist_ok=True)
+    d.a  # reads analysis.h5 and the configuration
+    d.obs_dir = REPO / arg.out / "data" / "strrings"
     s = load(d)
     figs = dict(funnel=fig_funnel, bound=fig_bound, acceptance=fig_acceptance, maps=fig_maps, integrator=fig_integrator,
                 observable=fig_observable, strrings=fig_strrings, corner=fig_corner, neighbours=fig_neighbours,

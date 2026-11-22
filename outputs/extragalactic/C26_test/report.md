@@ -185,26 +185,33 @@ batch size), not a seeding problem. A dataset is exactly reproducible only at th
 - **What the network receives.** 10 to 24 valid bins (5th to 95th percentile, median 16), with valid bins on both
   sides of the progenitor in 99.99 % of them; the radial contrast (r_max - r_min) / mean is 0.4 to 2.6
   (median 1.2), far above the 2 % noise.
-- **STRRINGS sample used: 32 of the 35 streams.** NGC1084, NGC1121 and PGC021008 are excluded (decision of
-  2026-11-22, Giuseppe; `STRRINGS_EXCLUDED` in `analysis/inspect_prior.py`). Every number below is for the 32.
-- **Against STRRINGS** (arXiv:2508.02154 table 4, transcribed from the arXiv HTML and not checked against the
-  journal table; lengths and angles are measured differently in data and simulation). 15 of the 32 observed
-  streams are shorter than the 100 kpc cut and 3 subtend less than 90 deg. Length / angle gives a median radius of
-  35 kpc for the data (5th to 95th percentile 16 to 77) against 78 kpc (38 to 174) for the usable simulations.
-  Only 2.3 % of the simulations passing the cuts are longer than 270 deg, against 10 of the 32 observed streams.
-  Counting simulations with a resolved orbit within 0.2 dex in length and 30 deg in angle of each observed
-  stream (no cut): median 1,128, fewer than 100 for 7 streams, none for 2 (PGC000902, PGC938075). With the three
-  cuts: median 106, none for 11.
-- **Nearest neighbours** (`strrings_neighbours_p1..4`, `strrings_neighbour_parameters`). Pool: resolved orbit and
-  contiguous valid bins, no C26 cut (55,674 tracks); distance = hypot(dlog10 length / 0.2, dangle / 30 deg). 24 of
-  the 32 streams have more than 50 tracks within distance 1 and a nearest neighbour closer than 0.35. NGC4256,
-  IC0120 and NGC1162 have 37, 17 and 13; NGC0804 has 1; PGC1001085, UGC08717, PGC000902 and PGC938075 have none
-  (nearest at distance 1.2, 3.0, 6.4 and 4.5). The neighbours (up to 100 per stream, 2,354 in all) come from a
-  narrow part of the prior: median projected distance x0 = 29 kpc (prior 101), 3D distance 100 kpc (177),
-  log10 M_halo 12.2, t_int 2.1 Gyr; 69 % are bound and 44 % pass the three cuts. Their q, cos i and psi follow the prior.
+- **STRRINGS sample used: the 32 observed tracks released with StreaMAX-fit** (commit `2e6a708`, `data/strrings/`,
+  fetched into `data/strrings/` on first use; `theta`, `r`, `r_err` in 10 deg bins). NGC1084, NGC1121 and
+  PGC021008 are excluded (decision of 2026-11-22, Giuseppe): they are the three of the 35 streams of
+  arXiv:2508.02154 that StreaMAX-fit does not release, its export script dropping them as measurement failures.
+  Each track is centred on its median angle, the StreaMAX-fit convention for where the model puts the
+  progenitor, and then moved by at most half a bin onto the simulation grid.
+- **The observed tracks against the C26 cuts**, measured exactly as for the simulations: 13 of 32 pass all three.
+  28 pass the angle cut, 15 the 100 kpc length cut and 22 the radius cut (10 have a bin inside 10 kpc).
+- **The observed streams are smaller than the simulated ones.** Mean track radius: median 25 kpc for the data
+  (5th to 95th percentile 10 to 47) against 130 kpc for all simulations and 65 kpc (30 to 155) for the usable
+  ones; 16 % of all simulated tracks and 27 % of the usable ones lie below 47 kpc. Median observed length 89 kpc,
+  angular length 165 deg; 10 of 32 are longer than 270 deg against 2.3 % of the simulations passing the cuts.
+  Median radial error of the data 4 %; radial contrast 1.0, like the simulations (1.2).
+- **Nearest neighbours on the radial bins** (`strrings_neighbours_p1..4`, third panel of `strrings`). Distance:
+  root-mean-square of r_sim / r_obs - 1 over the observed bins, over the 68,201 simulations with a resolved
+  orbit, each bin needing at least 50 particles, the simulation or its mirror image (about half of the best
+  matches are mirrored). Simulations covering every observed bin: 8,600 to 28,600 for tracks of 7 to 12 bins,
+  540 to 5,500 for 14 to 17 bins, 37 to 700 for 22 bins and more. Within 10 % rms: none for 23 of the 32
+  tracks, at most 58 for the others (NGC2769 58, NGC4686 28, ESO298-016 17, ESO079-003 11, NGC3041 10, one
+  each for four more). Within 20 % rms: fewer than 100 for 28 tracks, none for 12. Best match: 5 to 10 % rms for
+  9 tracks, 11 to 21 % for 14, above 21 % for 9. PGC938075 (radii below 1 kpc) is outside the prior altogether.
+- **Where the neighbours come from** (`strrings_neighbour_parameters`; up to 100 per track within 20 % rms, 862 in
+  all): median projected distance x0 = 38 kpc (prior 102), 3D distance 74 kpc (177), log10 M_halo 12.3; 77 % are
+  bound and 63 % pass the three cuts. Their q, cos i and psi follow the prior.
 - **Bound against unbound among the usable streams** (`gallery_bound`, `gallery_unbound`,
-  `bound_vs_unbound_tracks`). Length, angle and radius are alike (median angle 160 against 150 deg, radius 73
-  against 82 kpc). The width is not: the median radial width of a bin relative to its radius is 0.08 for the
+  `bound_vs_unbound_tracks`). Length, angle and radius are alike (median angle 160 against 150 deg, mean
+  radius 58 against 70 kpc). The width is not: the median radial width of a bin relative to its radius is 0.08 for the
   bound (16th to 84th percentile 0.05 to 0.16) and 0.24 for the unbound (0.11 to 0.49). 82 % of the bound and
   28 % of the unbound (2,775 streams) are thinner than 0.15. Unbound progenitors have at most one pericentre
   (53 % none); the bound ones a median of two.
@@ -286,8 +293,12 @@ StreaMAX's to the last digit).
   several cores per worker: the production run used 100 workers with one core and one shard each.
 - Tracks are not bit-identical across batch sizes for about 3 % of the streams (see above); whether the
   population statistics of those streams depend on the batch size was not tested beyond the pilot comparison.
-- The STRRINGS table used in the prior inspection was transcribed from the arXiv HTML by an automated reading and
-  not checked row by row; the comparison of lengths and angles ignores how they are measured in the images.
+- The observed tracks are compared in the StreaMAX-fit convention (centred on the median angle, no shift along
+  the track); the nearest neighbours were not searched over other positions of the progenitor. The stream widths
+  (one rug in `bound_vs_unbound_tracks`) come from table 4 of arXiv:2508.02154, transcribed from the arXiv HTML
+  and not checked row by row.
+- The production set uses a constant progenitor mass (C26); Chemaly et al. 2026b fit the STRRINGS tracks with the
+  mass ramp (`--progenitor-mass-loss linear`), which was not generated.
 - The slowdown of a worker when 100 run at once (4.6 to 2.5 streams/s) was measured, not explained.
 - The StreaMAX comparison was run for the default (`density`, `none`) and once for `--halo-flattening potential
   --progenitor-mass-loss linear` (60 bins: z mean 0.00, std 0.96, max 2.37; orbit 1.4e-5). The other two
