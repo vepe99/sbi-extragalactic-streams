@@ -11,6 +11,8 @@ dataset is the starting point for testing whether an amortized posterior estimat
 
 - `scripts/extragalactic/generate.py`: prior, simulator, tests, pilot, production run, diagnostics
 - `scripts/extragalactic/plot.py`: figures
+- `analysis/inspect_prior.py`: prior inspection ahead of amortized inference (usable fraction, what the selection
+  cuts do to the prior, where the integrator fails, the prior predictive against the STRRINGS streams)
 - `outputs/extragalactic/C26_test/README.md`: data schema
 - `outputs/extragalactic/C26_test/report.md`: what was tested and run, and every StreaMAX detail looked up
 
@@ -61,7 +63,19 @@ are untested.
 the analysis and training code that will follow: `uv sync`, then `uv run python ...`. Add `--extra gpu` for the
 CUDA 12 wheels. The five commands above do not use it; they run from the script headers.
 
+```bash
+uv run python analysis/inspect_prior.py    # plots/prior_inspection/ + data/prior_inspection.json
+```
+
 ## Hardware
 
-Generated on a dual-socket AMD EPYC 7713 (2 x 64 cores, 256 threads), 1 TB RAM, Ubuntu 24.04, no GPU.
+Generated on a dual-socket AMD EPYC 7713 (2 x 64 cores, 256 threads), 1 TB RAM, Ubuntu 24.04, no GPU:
+100 single-core workers, 100,000 streams in 435 s (230 streams/s), 138 GB of memory at the peak.
+
+```bash
+uv run --script scripts/extragalactic/generate.py run --cpu --batch-size 16 --cpu-workers 100 --cpu-cores 0-49,64-113
+```
+
+Tracks are bit-identical across thread counts but not across batch sizes (about 3 % of the streams, those whose
+orbit the 99-step integrator does not resolve), so keep `--batch-size 16` to reproduce this set exactly.
 Run details, timings and results: `outputs/extragalactic/C26_test/report.md`.
