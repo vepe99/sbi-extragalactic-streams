@@ -13,7 +13,7 @@ requirements = [
     { name = "dataclassish", specifier = "==0.9.2" },
     { name = "diffrax", specifier = "==0.7.2" },
     { name = "equinox", specifier = "==0.13.8" },
-    { name = "galax", specifier = "==0.1.0" },
+    { name = "galax", git = "https://github.com/GalacticDynamics/galax.git?rev=4c29842ed59b45a3ac0fafe56b589ae7f57fbe2b" },
     { name = "h5py", specifier = "==3.16.0" },
     { name = "jax", extras = ["cuda12"], specifier = "==0.12.1" },
     { name = "jaxtyping", specifier = "==0.3.11" },
@@ -25,7 +25,7 @@ requirements = [
     { name = "scipy", specifier = "==1.18.1" },
     { name = "streamax", git = "https://github.com/David-Chemaly/StreaMAX.git?rev=9fd520ea2904b617c701e1ee5b8740a9a0fd148e" },
     { name = "unxt", specifier = "==2.2.0" },
-    { name = "xmmutablemap", specifier = "==0.2.2" },
+    { name = "xmmutablemap", specifier = "==0.3.1" },
 ]
 
 [[package]]
@@ -76,6 +76,18 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/79/34/c0cfdaee9c796c8381439fed0fcab62810753b8b0adb1ec88fa7f41eaa5d/beartype-0.23.1.tar.gz", hash = "sha256:8b805f246b32931c74f2b321ea0939fe5bb2ff43c12a3eff19cc4c854b832e1d", size = 1993714, upload-time = "2026-10-11T05:36:55.251Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/1c/cb/2f6aa982e2860c1156830db3da7f823b71784ed7d533ca289ea9b6c6347a/beartype-0.23.1-py3-none-any.whl", hash = "sha256:4461b4dc57e3fdd6c8a8464b22cf118002eea107c33e9fef651c69068ab3cce3", size = 1582101, upload-time = "2026-10-11T05:36:52.431Z" },
+]
+
+[[package]]
+name = "boundinstance"
+version = "0.1.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/08/7f/9f8d06c768f7c26ce7362f81892143d712a6d649bf386138c99264968d04/boundinstance-0.1.1.tar.gz", hash = "sha256:2e435067474ad77bda233b3f55c8a6a51d61530077d5d827c6c0adcecff34655", size = 115209, upload-time = "2026-09-28T21:12:55.041Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/73/58/505fb55ff15df82c02f5d1d5c2384d799f846629dd37b3a9ca14e271a23c/boundinstance-0.1.1-cp312-cp312-macosx_10_13_x86_64.whl", hash = "sha256:83b0ba9e15378398ef9b5848a2d6cc554a4c10885ae3eb3bed16b3b567b38f27", size = 62854, upload-time = "2026-09-28T21:12:41.276Z" },
+    { url = "https://files.pythonhosted.org/packages/6a/cd/a1e9f65bc2950a0a3e057a2b934bfc211aa4d094412652b525708c3190b8/boundinstance-0.1.1-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:7b304b93a4d98ddde3455705f7b4c2dd04a2a98c3657e79a4ff76f4201efc16e", size = 60269, upload-time = "2026-09-28T21:12:42.503Z" },
+    { url = "https://files.pythonhosted.org/packages/52/60/0928478b0749e3021af5f5d0ee49bd07c05dd084209ae06d0e2716c42dc6/boundinstance-0.1.1-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:d2f6712d23804413892e008c925c88aa1aa71973305eb5be831e04a83a015944", size = 78326, upload-time = "2026-09-28T21:12:43.625Z" },
+    { url = "https://files.pythonhosted.org/packages/61/31/b43e60ddc2b269caf87d63f3ce6c9a1e9520337e984dcf7bbf2eff3f12f7/boundinstance-0.1.1-cp312-cp312-win_amd64.whl", hash = "sha256:b36ab7454ca57fbe2facc033f48629b76b2526a978e40b3dd6ffb79eee6b9c0d", size = 35505, upload-time = "2026-09-28T21:12:44.698Z" },
 ]
 
 [[package]]
@@ -221,40 +233,183 @@ wheels = [
 
 [[package]]
 name = "galax"
-version = "0.1.0"
-source = { registry = "https://pypi.org/simple" }
+version = "0.0.4.dev199+g4c29842"
+source = { git = "https://github.com/GalacticDynamics/galax.git?rev=4c29842ed59b45a3ac0fafe56b589ae7f57fbe2b#4c29842ed59b45a3ac0fafe56b589ae7f57fbe2b" }
 dependencies = [
-    { name = "astropy" },
     { name = "beartype" },
+    { name = "galax-actionangle" },
+    { name = "galax-coordinates" },
+    { name = "galax-dynamics" },
+    { name = "galax-fields" },
+    { name = "galax-interop-astropy" },
+    { name = "galax-nbody" },
+    { name = "galax-orbits" },
+    { name = "galax-potential" },
+]
+
+[[package]]
+name = "galax-actionangle"
+version = "0.1.dev904"
+source = { git = "https://github.com/GalacticDynamics/galax.git?subdirectory=packages%2Fgalax.actionangle&rev=4c29842ed59b45a3ac0fafe56b589ae7f57fbe2b#4c29842ed59b45a3ac0fafe56b589ae7f57fbe2b" }
+dependencies = [
+    { name = "coordinax" },
+    { name = "equinox" },
+    { name = "galax-coordinates" },
+    { name = "galax-potential" },
+    { name = "jax" },
+    { name = "jaxtyping" },
+    { name = "numpy" },
+    { name = "plum" },
+    { name = "quaxed" },
+    { name = "unxt" },
+]
+
+[[package]]
+name = "galax-coordinates"
+version = "0.1.dev904"
+source = { git = "https://github.com/GalacticDynamics/galax.git?subdirectory=packages%2Fgalax.coordinates&rev=4c29842ed59b45a3ac0fafe56b589ae7f57fbe2b#4c29842ed59b45a3ac0fafe56b589ae7f57fbe2b" }
+dependencies = [
+    { name = "coordinax" },
+    { name = "dataclassish" },
+    { name = "equinox" },
+    { name = "jax" },
+    { name = "jaxtyping" },
+    { name = "oncequinox" },
+    { name = "plum" },
+    { name = "quax" },
+    { name = "quaxed" },
+    { name = "unxt" },
+    { name = "wadler-lindig" },
+    { name = "xmmutablemap" },
+    { name = "zeroth" },
+]
+
+[[package]]
+name = "galax-dynamics"
+version = "0.1.dev904"
+source = { git = "https://github.com/GalacticDynamics/galax.git?subdirectory=packages%2Fgalax.dynamics&rev=4c29842ed59b45a3ac0fafe56b589ae7f57fbe2b#4c29842ed59b45a3ac0fafe56b589ae7f57fbe2b" }
+dependencies = [
+    { name = "boundinstance" },
     { name = "coordinax" },
     { name = "dataclassish" },
     { name = "diffrax" },
     { name = "diffraxtra" },
     { name = "equinox" },
+    { name = "galax-coordinates" },
+    { name = "galax-fields" },
+    { name = "galax-nbody" },
+    { name = "galax-orbits" },
+    { name = "galax-potential" },
+    { name = "interpax" },
+    { name = "jax" },
+    { name = "jaxmore" },
+    { name = "jaxtyping" },
+    { name = "numpy" },
+    { name = "optimistix" },
+    { name = "plotting-backends" },
+    { name = "plum" },
+    { name = "quaxed" },
+    { name = "unxt" },
+    { name = "xmmutablemap" },
+    { name = "zeroth" },
+]
+
+[[package]]
+name = "galax-fields"
+version = "0.1.dev904"
+source = { git = "https://github.com/GalacticDynamics/galax.git?subdirectory=packages%2Fgalax.fields&rev=4c29842ed59b45a3ac0fafe56b589ae7f57fbe2b#4c29842ed59b45a3ac0fafe56b589ae7f57fbe2b" }
+dependencies = [
+    { name = "diffrax" },
+    { name = "diffraxtra" },
+    { name = "equinox" },
+    { name = "jax" },
+    { name = "jaxtyping" },
+    { name = "numpy" },
+    { name = "plum" },
+    { name = "quaxed" },
+    { name = "unxt" },
+]
+
+[[package]]
+name = "galax-interop-astropy"
+version = "0.1.dev904"
+source = { git = "https://github.com/GalacticDynamics/galax.git?subdirectory=packages%2Fgalax.interop.astropy&rev=4c29842ed59b45a3ac0fafe56b589ae7f57fbe2b#4c29842ed59b45a3ac0fafe56b589ae7f57fbe2b" }
+dependencies = [
+    { name = "astropy" },
+    { name = "galax-coordinates" },
+    { name = "galax-dynamics" },
+    { name = "galax-potential" },
+    { name = "plum" },
+    { name = "unxt" },
+]
+
+[[package]]
+name = "galax-nbody"
+version = "0.1.dev904"
+source = { git = "https://github.com/GalacticDynamics/galax.git?subdirectory=packages%2Fgalax.nbody&rev=4c29842ed59b45a3ac0fafe56b589ae7f57fbe2b#4c29842ed59b45a3ac0fafe56b589ae7f57fbe2b" }
+dependencies = [
+    { name = "equinox" },
+    { name = "galax-orbits" },
+    { name = "galax-potential" },
+    { name = "jax" },
+    { name = "jaxtyping" },
+    { name = "numpy" },
+    { name = "plum" },
+    { name = "unxt" },
+]
+
+[[package]]
+name = "galax-orbits"
+version = "0.1.dev904"
+source = { git = "https://github.com/GalacticDynamics/galax.git?subdirectory=packages%2Fgalax.orbits&rev=4c29842ed59b45a3ac0fafe56b589ae7f57fbe2b#4c29842ed59b45a3ac0fafe56b589ae7f57fbe2b" }
+dependencies = [
+    { name = "boundinstance" },
+    { name = "coordinax" },
+    { name = "dataclassish" },
+    { name = "diffrax" },
+    { name = "diffraxtra" },
+    { name = "equinox" },
+    { name = "galax-coordinates" },
+    { name = "galax-fields" },
+    { name = "galax-potential" },
+    { name = "jax" },
+    { name = "jaxmore" },
+    { name = "jaxtyping" },
+    { name = "numpy" },
+    { name = "plotting-backends" },
+    { name = "plum" },
+    { name = "quaxed" },
+    { name = "unxt" },
+]
+
+[[package]]
+name = "galax-potential"
+version = "0.1.dev904"
+source = { git = "https://github.com/GalacticDynamics/galax.git?subdirectory=packages%2Fgalax.potential&rev=4c29842ed59b45a3ac0fafe56b589ae7f57fbe2b#4c29842ed59b45a3ac0fafe56b589ae7f57fbe2b" }
+dependencies = [
+    { name = "astropy" },
+    { name = "boundinstance" },
+    { name = "coordinax" },
+    { name = "dataclassish" },
+    { name = "equinox" },
+    { name = "galax-coordinates" },
     { name = "interpax" },
     { name = "is-annotated" },
     { name = "jax" },
-    { name = "jaxlib" },
     { name = "jaxtyping" },
-    { name = "oncequinox" },
-    { name = "optimistix" },
-    { name = "optional-dependencies" },
+    { name = "numpy" },
     { name = "optype" },
-    { name = "packaging" },
     { name = "plotting-backends" },
     { name = "plum" },
     { name = "quax" },
+    { name = "quax-blocks" },
     { name = "quaxed" },
-    { name = "typing-extensions" },
+    { name = "spexial" },
     { name = "unxt" },
     { name = "unxts-parametric" },
     { name = "wadler-lindig" },
     { name = "xmmutablemap" },
     { name = "zeroth" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/ce/b6/db2dd1aca753957d22cf8d1f8cb24c906238b2842a4fe9322733be30968d/galax-0.1.0.tar.gz", hash = "sha256:730e8e06c949fdcce19a4483b7262f6da7f4113d0ff089fabe22320a344504bb", size = 380689, upload-time = "2026-10-09T18:10:37.733Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/0f/3f/0522114cb634f10b90ce4ece0fcfd38cdc54751cb1269d7cb48cd6c1fb8e/galax-0.1.0-py3-none-any.whl", hash = "sha256:47f10d3d7d1512d8331fdffdfc13c39593f8b35a147327e848903f0e0deefeef", size = 274185, upload-time = "2026-10-09T18:10:36.227Z" },
 ]
 
 [[package]]
@@ -389,6 +544,20 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/f5/b6/a63b3abf05034c858786c92f73a761e5d3a58b08d0ff71a79509aaa54749/jaxlib-0.12.1-cp312-cp312-manylinux_2_27_aarch64.whl", hash = "sha256:1ff691a4b1cc5cf7f958ff95d21d3f00d9a6c44b522b8bbe93a57b021dc92429", size = 79551082, upload-time = "2026-11-18T13:58:57.481Z" },
     { url = "https://files.pythonhosted.org/packages/f5/43/762ac1c94ac146e6a4f8cca9b34e1cdf9e4a1bd8a4994ae733086d4c898d/jaxlib-0.12.1-cp312-cp312-manylinux_2_27_x86_64.whl", hash = "sha256:596a8a7772aa92e32c2c40967577c3ffea00645544e2166a54f50208b4003f42", size = 83359059, upload-time = "2026-11-18T13:59:00.597Z" },
     { url = "https://files.pythonhosted.org/packages/43/f5/edf747588459a853c673bd8697d66bea1744988cb6290e7281e7a61c4eef/jaxlib-0.12.1-cp312-cp312-win_amd64.whl", hash = "sha256:f6ce9ee0fbff98d7d462d2cbc80ce965da0be9d961998200574862c0268c2253", size = 67610914, upload-time = "2026-11-18T13:59:03.96Z" },
+]
+
+[[package]]
+name = "jaxmore"
+version = "0.6.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "jax" },
+    { name = "jaxtyping" },
+    { name = "optional-dependencies" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/eb/d1/cd5d969b9542115587a54db177f1206cff889fe61970db2f6a065513778a/jaxmore-0.6.1.tar.gz", hash = "sha256:f85e28fe65098121c6f732518d2fbf79262e5d55dea952ddfea150334f8c4eb5", size = 198786, upload-time = "2026-11-18T22:49:10.832Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a3/5d/73aedc01494447ab9064f0ea31a7c465764fe1c9071471a537191545a745/jaxmore-0.6.1-py3-none-any.whl", hash = "sha256:08a980b74fa0c3446debea960c9d2ae3a73bdf7a6ac746af67525b1b3765b303", size = 53968, upload-time = "2026-11-18T22:49:09.28Z" },
 ]
 
 [[package]]
@@ -953,6 +1122,21 @@ wheels = [
 ]
 
 [[package]]
+name = "spexial"
+version = "0.2.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "jax" },
+    { name = "jaxlib" },
+    { name = "jaxtyping" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/27/8f/f4899e9cb0aa710ecbdbc304358dc03a4d9b1ae04241c6bf127da5992f5f/spexial-0.2.2.tar.gz", hash = "sha256:2ac0fdc0c6548b3380e3a417b7e769ed82ec5e37e465ff352bf24742ea7b4fcb", size = 206295, upload-time = "2026-10-19T21:08:26.242Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/04/0b/63a5010720e9a04153b61fb11f7d81ae23ea8bf0927f5863874ea17fd03d/spexial-0.2.2-py3-none-any.whl", hash = "sha256:8c9cd71088451e315225950d043b8936ae4d1d88977f3574e24c8e14f1341050", size = 81517, upload-time = "2026-10-19T21:08:24.596Z" },
+]
+
+[[package]]
 name = "streamax"
 version = "0.4.1"
 source = { git = "https://github.com/David-Chemaly/StreaMAX.git?rev=9fd520ea2904b617c701e1ee5b8740a9a0fd148e#9fd520ea2904b617c701e1ee5b8740a9a0fd148e" }
@@ -1080,15 +1264,15 @@ wheels = [
 
 [[package]]
 name = "xmmutablemap"
-version = "0.2.2"
+version = "0.3.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "jax" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/c5/c5/45a697fb03521d8caefe1d1c9e32153e461e1d4f334636bbafc56cff66b0/xmmutablemap-0.2.2.tar.gz", hash = "sha256:c47d46fd2c6e622861125c5c521a0c5e03e992b6cd462a76f2796741cb11e774", size = 116019, upload-time = "2026-09-07T19:17:57.112Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/92/f4/ea72d36313924c94c073e7c71af6584e10517e8be2c77ce0774f98913396/xmmutablemap-0.3.1.tar.gz", hash = "sha256:2f38060deb80ae75dc6bd150d0dac87b1e098d08301482267e579ca5b9cb4aa1", size = 176274, upload-time = "2026-10-16T01:47:12.045Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/97/82/591c092e6b350ced7245f5b34e625b69f57cb076ff16845f7e6d6f396202/xmmutablemap-0.2.2-py3-none-any.whl", hash = "sha256:fd5ecef589efd3038db2ccaca67dfc26df19cce478eb4968a0e058c6f24b1c17", size = 7662, upload-time = "2026-09-07T19:17:55.753Z" },
+    { url = "https://files.pythonhosted.org/packages/b1/2d/fa9208602efe8a8705a6dba55e45e9fb239c07532d08501971d08ba874a5/xmmutablemap-0.3.1-py3-none-any.whl", hash = "sha256:fb5d36c699fb7b80ed2d0cf34a94d6d5f6df1076ad7773adec1cf7f5e76c32ab", size = 13744, upload-time = "2026-10-16T01:47:10.728Z" },
 ]
 
 [[package]]

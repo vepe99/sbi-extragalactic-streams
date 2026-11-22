@@ -2,9 +2,9 @@
 # /// script
 # requires-python = ">=3.12,<3.13"
 # dependencies = [
-#     "galax==0.1.0",
+#     "galax @ git+https://github.com/GalacticDynamics/galax.git@4c29842ed59b45a3ac0fafe56b589ae7f57fbe2b",
 #     "jax[cuda12]==0.12.1",
-#     "xmmutablemap==0.2.2",
+#     "xmmutablemap==0.3.1",
 #     "unxt==2.2.0",
 #     "coordinax==0.24.3",
 #     "quax==0.4.6",
@@ -87,6 +87,12 @@ class Config:
     # --- forward model
     n_particles: int = 10_000
     n_steps: int = 99  # leapfrog steps per particle; n_steps + 1 release epochs (StreaMAX-fit default)
+    # leapfrog: the StreaMAX scheme above | galax: galax's Integrator (diffrax Dopri8, adaptive steps) for the
+    # progenitor and for every particle, one leading and one trailing particle per release time; n_steps is
+    # then the number of points sampled along each particle's path for the unwrapped angle and the ordering
+    integrator: str = "leapfrog"
+    max_steps: int = 1999  # galax: most steps one adaptive solve may take (a particle needing more is non-finite)
+    rtol: float = 1e-7  # galax: relative and absolute tolerance of the step-size controller (galax's default)
     halo_flattening: str = "density"  # density (NFWFlatDensity) | potential (legacy NFW)
     # none (C26: constant mass, a progenitor that is still there) | linear (2026b: mass ramped to 1 Msun, no
     # visible progenitor) | mixed (each stream draws one of the two with probability p_dissolved for the ramp)
@@ -147,12 +153,18 @@ class Config:
             d["p_dissolved"] = self.p_dissolved
         if self.alt_ordering:
             d["alt_ordering"] = True
+        if self.integrator != "leapfrog":
+            d.update(integrator=self.integrator, max_steps=self.max_steps, rtol=self.rtol)
         blob = json.dumps(d, sort_keys=True)
         return hashlib.sha1(blob.encode()).hexdigest()[:12]
 
     def check(self) -> None:
         ne = self.n_epochs
-        if self.n_particles % ne or (self.n_particles // ne) % 2:
+        assert self.integrator in ("leapfrog", "galax")
+        if self.integrator == "galax":
+            if self.n_particles % 2:
+                raise SystemExit("n_particles must be even: one leading and one trailing particle per release time")
+        elif self.n_particles % ne or (self.n_particles // ne) % 2:
             raise SystemExit(
                 f"n_particles ({self.n_particles}) must be an even multiple of n_steps + 1 ({ne}): StreaMAX "
                 f"releases n_particles / (n_steps + 1) particles per epoch, half from each Lagrange point."
@@ -489,6 +501,63 @@ def gibbons14_angle(x, y, g, ok):
     return jnp.zeros_like(thu).at[order].set(thu)
 
 
+def _finish(cfg: Config, rep, host, acc_h, energy, xf, vf, t_int, x_sat, v_sat, tidal_ok, xN, th0, dphi, g):
+    """Everything after the integration, shared by the two integrators: unwrapped angle, ordering, binned track
+    and diagnostics. `x_sat`, `v_sat`: the progenitor at the release times (first = -t_int, last = today);
+    `xN`: final particle positions; `th0`: polar angle of each particle at release; `dphi`, `g`: its accumulated
+    angle and Gibbons coordinate; `rep` repeats a per-release array once per particle."""
+    # --- C26 sec. 2.2: progenitor's unwrapped angle at release + the particle's own offset and
+    #     accumulated angle, minus the progenitor's final unwrapped angle
+    thp = jnp.arctan2(x_sat[:, 1], x_sat[:, 0])
+    dthp = _wrap(jnp.diff(thp))
+    thp_u = jnp.concatenate([thp[:1], thp[0] + jnp.cumsum(dthp)])
+    phi = rep(thp_u) + _wrap(th0 - rep(thp)) + dphi - thp_u[-1]
+    ok = jnp.all(jnp.isfinite(xN), -1) & jnp.isfinite(phi) & rep(tidal_ok)
+    rN = jnp.hypot(xN[:, 0], xN[:, 1])
+    phi_c26 = phi
+    if cfg.track_ordering == "gibbons14" or cfg.alt_ordering:
+        # StreaMAX zeroes this angle on the particle with the smallest |g|; here it is moved onto the
+        # progenitor's position today, so that both orderings share their zero and their bins
+        pg = gibbons14_angle(xN[:, 0], xN[:, 1], g, ok)
+        js = jnp.argmin(jnp.where(ok, jnp.abs(g), jnp.inf))
+        phi_g14 = pg + _wrap(jnp.arctan2(xN[js, 1], xN[js, 0]) - jnp.arctan2(xf[1], xf[0]))
+    phi, phi_other = (phi_g14, phi_c26) if cfg.track_ordering == "gibbons14" else (phi_c26, None)
+    if cfg.alt_ordering and cfg.track_ordering != "gibbons14":
+        phi_other = phi_g14
+    phi_deg = jnp.rad2deg(phi)
+    out = bin_track(phi_deg, rN, ok, cfg)
+    if cfg.alt_ordering:
+        alt = bin_track(jnp.rad2deg(phi_other), rN, ok & jnp.isfinite(phi_other), cfg)
+        out.update({f"alt_{k}": alt[k] for k in TRACK_KEYS})
+
+    # --- diagnostics from a finely sampled backward orbit
+    xfi, vfi = kdk(acc_h, xf, vf, -t_int / cfg.n_fine, cfg.n_fine)
+    X = jnp.concatenate([xf[None], xfi])
+    rr = jnp.linalg.norm(X, axis=-1)
+    dth = _wrap(jnp.diff(jnp.arctan2(X[:, 1], X[:, 0])))
+    cr, dot = jnp.linalg.norm(jnp.cross(X[:-1], X[1:]), axis=-1), jnp.sum(X[:-1] * X[1:], -1)
+    E0 = energy(xf, vf)
+    E_n, E_fine = energy(x_sat[0], v_sat[0]), energy(xfi[-1], vfi[-1])
+    out.update(
+        n_bad=jnp.sum(~ok).astype(jnp.int32),
+        tidal_bad=jnp.any(~tidal_ok),
+        prog_nonmono=jnp.any(dthp <= 0),
+        prog_finite=jnp.all(jnp.isfinite(x_sat)) & jnp.all(jnp.isfinite(v_sat)),
+        E=E0 / KMS**2, Phi0=host._potential(xf, 0.0) / KMS**2,  # (km/s)^2
+        dE_rel=jnp.abs(E_n - E0) / jnp.abs(E0), dE_rel_fine=jnp.abs(E_fine - E0) / jnp.abs(E0),
+        dx_rel=jnp.linalg.norm(x_sat[0] - xfi[-1]) / jnp.linalg.norm(xfi[-1]),
+        r_min=jnp.min(rr), r_max=jnp.max(rr),
+        n_peri=jnp.sum((rr[1:-1] < rr[:-2]) & (rr[1:-1] <= rr[2:])).astype(jnp.int32),
+        n_apo=jnp.sum((rr[1:-1] > rr[:-2]) & (rr[1:-1] >= rr[2:])).astype(jnp.int32),
+        swept_proj_deg=jnp.rad2deg(-jnp.sum(dth)),  # forward in time, signed
+        swept_3d_deg=jnp.rad2deg(jnp.sum(jnp.arctan2(cr, dot))),
+        part_xy=xN[:, :2].astype(jnp.float32), part_phi=phi_deg.astype(jnp.float32),
+        part_g=g.astype(jnp.float32),
+        sat_xy=x_sat[:, :2].astype(jnp.float32),
+    )
+    return out
+
+
 def make_simulator(cfg: Config):
     """Returns the jitted, vmapped simulator: batched inputs of `theta_to_inputs` + spray keys -> dict."""
     cfg.check()
@@ -554,55 +623,123 @@ def make_simulator(cfg: Config):
         c0 = (x0, v0, acc(x0, rep(ppos[0]), rep(pmass[0])), th0, jnp.zeros(N), jnp.zeros(N))
         (xN, _, _, _, dphi, g), _ = jax.lax.scan(step, c0, (ppos[:-1], ppos[1:], pmass[1:]))
 
-        # --- C26 sec. 2.2: progenitor's unwrapped angle at release + the particle's own offset and
-        #     accumulated angle, minus the progenitor's final unwrapped angle
-        thp = jnp.arctan2(x_sat[:, 1], x_sat[:, 0])
-        dthp = _wrap(jnp.diff(thp))
-        thp_u = jnp.concatenate([thp[:1], thp[0] + jnp.cumsum(dthp)])
-        phi = rep(thp_u) + _wrap(th0 - rep(thp)) + dphi - thp_u[-1]
-        ok = jnp.all(jnp.isfinite(xN), -1) & jnp.isfinite(phi) & rep(tidal_ok)
-        rN = jnp.hypot(xN[:, 0], xN[:, 1])
-        phi_c26 = phi
-        if cfg.track_ordering == "gibbons14" or cfg.alt_ordering:
-            # StreaMAX zeroes this angle on the particle with the smallest |g|; here it is moved onto the
-            # progenitor's position today, so that both orderings share their zero and their bins
-            pg = gibbons14_angle(xN[:, 0], xN[:, 1], g, ok)
-            js = jnp.argmin(jnp.where(ok, jnp.abs(g), jnp.inf))
-            phi_g14 = pg + _wrap(jnp.arctan2(xN[js, 1], xN[js, 0]) - jnp.arctan2(xf[1], xf[0]))
-        phi, phi_other = (phi_g14, phi_c26) if cfg.track_ordering == "gibbons14" else (phi_c26, None)
-        if cfg.alt_ordering and cfg.track_ordering != "gibbons14":
-            phi_other = phi_g14
-        phi_deg = jnp.rad2deg(phi)
-        out = bin_track(phi_deg, rN, ok, cfg)
-        if cfg.alt_ordering:
-            alt = bin_track(jnp.rad2deg(phi_other), rN, ok & jnp.isfinite(phi_other), cfg)
-            out.update({f"alt_{k}": alt[k] for k in TRACK_KEYS})
+        return _finish(cfg, rep, host, acc_h, energy, xf, vf, t_int, x_sat, v_sat, tidal_ok, xN, th0, dphi, g)
 
-        # --- diagnostics from a finely sampled backward orbit
-        xfi, vfi = kdk(acc_h, xf, vf, -t_int / cfg.n_fine, cfg.n_fine)
-        X = jnp.concatenate([xf[None], xfi])
-        rr = jnp.linalg.norm(X, axis=-1)
-        dth = _wrap(jnp.diff(jnp.arctan2(X[:, 1], X[:, 0])))
-        cr, dot = jnp.linalg.norm(jnp.cross(X[:-1], X[1:]), axis=-1), jnp.sum(X[:-1] * X[1:], -1)
-        E0 = energy(xf, vf)
-        E_n, E_fine = energy(x_sat[0], v_sat[0]), energy(xfi[-1], vfi[-1])
-        out.update(
-            n_bad=jnp.sum(~ok).astype(jnp.int32),
-            tidal_bad=jnp.any(~tidal_ok),
-            prog_nonmono=jnp.any(dthp <= 0),
-            prog_finite=jnp.all(jnp.isfinite(x_sat)) & jnp.all(jnp.isfinite(v_sat)),
-            E=E0 / KMS**2, Phi0=host._potential(xf, 0.0) / KMS**2,  # (km/s)^2
-            dE_rel=jnp.abs(E_n - E0) / jnp.abs(E0), dE_rel_fine=jnp.abs(E_fine - E0) / jnp.abs(E0),
-            dx_rel=jnp.linalg.norm(x_sat[0] - xfi[-1]) / jnp.linalg.norm(xfi[-1]),
-            r_min=jnp.min(rr), r_max=jnp.max(rr),
-            n_peri=jnp.sum((rr[1:-1] < rr[:-2]) & (rr[1:-1] <= rr[2:])).astype(jnp.int32),
-            n_apo=jnp.sum((rr[1:-1] > rr[:-2]) & (rr[1:-1] >= rr[2:])).astype(jnp.int32),
-            swept_proj_deg=jnp.rad2deg(-jnp.sum(dth)),  # forward in time, signed
-            swept_3d_deg=jnp.rad2deg(jnp.sum(jnp.arctan2(cr, dot))),
-            part_xy=xN[:, :2].astype(jnp.float32), part_phi=phi_deg.astype(jnp.float32),
-            part_g=g.astype(jnp.float32),
-            sat_xy=x_sat[:, :2].astype(jnp.float32),
-        )
+    fn = jax.jit(jax.vmap(sim))
+
+    def run(inp: dict, keys):
+        return fn(*(jnp.asarray(inp[k]) for k in ("logM", "Rs", "q", "nvec", "logm", "rs", "wf", "t_int", "ramp")), keys)
+
+    return run
+
+
+# ======================================================================================================
+# galax extension 3: the stream integrated with galax's Integrator (diffrax, adaptive steps)
+# ======================================================================================================
+if "gp" in globals():
+    import diffrax as dfx
+    from galax.orbits import AbstractOrbitField
+    from typing import Any
+
+    class StreamField(AbstractOrbitField):
+        """A particle (row 0) and its own copy of the progenitor (row 1), integrated together as galax's
+        `MockStreamGenerator` does with a `progenitor_potential`. The particle feels the host and a Plummer
+        sphere centred on row 1; the progenitor feels the host alone. The Plummer mass follows the StreaMAX
+        ramp, log10 m linear in time from `logm0` (t = 0) to `logm1` (t = t_int); equal values = constant mass.
+        galax's own generator returns final positions only and a constant progenitor mass, hence this field."""
+
+        host: gp.AbstractPotential
+        plummer: gp.AbstractPotential  # unit mass: the Plummer force is linear in the mass
+        logm0: Any
+        logm1: Any
+        t_int: Any
+
+        @property
+        def units(self):
+            return self.host.units
+
+    @AbstractOrbitField.__call__.dispatch
+    def _stream_field_call(self: StreamField, t: Any, qp: tuple[Any, Any], args: object = None, /):
+        q, p = qp
+        a = -self.host._gradient(q, t)
+        m = 10.0 ** (self.logm0 + (self.logm1 - self.logm0) * t / self.t_int)
+        a = a.at[..., 0, :].add(-m * self.plummer._gradient(q[..., 0, :] - q[..., 1, :], t))
+        return p, a
+
+
+def make_simulator_galax(cfg: Config):
+    """Same inputs and outputs as `make_simulator`, with every orbit integrated by galax.
+
+    Progenitor: from today back to -t_int and forward again on the release times. Release: galax
+    `FardalStreamDF`, one leading and one trailing particle at each of n_particles / 2 times uniform over
+    [-t_int, 0]. Particles: each solved from its release to today together with its own copy of the
+    progenitor (`StreamField`), with the adaptive steps of diffrax Dopri8 under a PID controller. The
+    unwrapped angle and the Gibbons coordinate are accumulated on `n_steps` points sampled uniformly in time
+    along each path, with the formulas of the leapfrog version. Times run from 0 (-t_int) to t_int (today)."""
+    cfg.check()
+    N, n_rel, K = cfg.n_particles, cfg.n_particles // 2, cfg.n_steps
+    solver = gd.OrbitSolver(solver=dfx.Dopri8(scan_kind="bounded"),
+                            stepsize_controller=dfx.PIDController(rtol=cfg.rtol, atol=cfg.rtol), max_steps=cfg.max_steps)
+    df = gd.FardalStreamDF()
+    rep = lambda a: jnp.repeat(a, 2, axis=0)  # per release time -> per particle (trailing, leading)
+    frac = jnp.arange(1, K + 1) / K
+
+    def solve(field, q0, p0, t0, t1, ts):
+        """-> positions and velocities at `ts`, and the number of steps taken. Beyond `max_steps` the
+        result is non-finite (throw=False) instead of an error for the whole batch."""
+        sol = solver.solve(field, (u.Q(q0, "kpc"), u.Q(p0, "kpc/Gyr")), u.Q(t0, "Gyr"), u.Q(t1, "Gyr"),
+                           saveat=u.Q(ts, "Gyr"), max_steps=cfg.max_steps, throw=False)
+        return sol.ys[0], sol.ys[1], sol.stats["num_steps"]
+
+    def sim(logM, Rs, q, nvec, logm, rs, wf, t_int, ramp, key):
+        host = OrientedNFWPotential(m=10.0**logM, r_s=Rs, q=q, axis=nvec, units=USYS, flatten=cfg.halo_flattening)
+        plum = gp.PlummerPotential(m_tot=1.0, r_s=rs, units=USYS)
+        acc_h = lambda x: -host._gradient(x, 0.0)
+        energy = lambda x, v: 0.5 * jnp.sum(v * v, -1) + host._potential(x, 0.0)
+        xf, vf = wf[:3], wf[3:]
+        logm_f = jnp.where(ramp > 0.5, 0.0, logm)
+        hfield = gd.HamiltonianField(host)
+
+        # --- progenitor: today -> -t_int, then forward on the release times
+        ts = jnp.linspace(0.0, t_int, n_rel)
+        xb, vb, n_back = solve(hfield, xf, vf, t_int, 0.0, jnp.zeros(1))
+        x_sat, v_sat, n_fwd = solve(hfield, xb[0], vb[0], 0.0, t_int, ts)
+        logm_sat = logm + (logm_f - logm) * ts / t_int
+
+        # --- release: galax Fardal+15 DF (StreaMAX: NaN where Omega^2 - d2Phi/dr2 <= 0)
+        r2 = jnp.sum(x_sat**2, -1)
+        om2 = jnp.sum(jnp.cross(x_sat, v_sat) ** 2, -1) / r2**2
+        d2 = jnp.einsum("ei,eij,ej->e", x_sat, host._hessian(x_sat, 0.0), x_sat) / r2
+        tidal_ok = (om2 - d2) > 0
+        xl, vl, xt, vt = df._sample(key, host, u.Q(x_sat, "kpc"), u.Q(v_sat, "kpc/Gyr"),
+                                    u.Q(10.0**logm_sat, "Msun"), u.Q(ts, "Gyr"))
+        xl, xt = u.ustrip("kpc", xl), u.ustrip("kpc", xt)
+        vl, vt = u.ustrip("kpc/Gyr", vl), u.ustrip("kpc/Gyr", vt)
+
+        # --- particles: one adaptive solve each, from release to today (a hair later, as galax does, so that
+        #     the particles released today have a span to integrate over)
+        field = StreamField(host, plum, logm, logm_f, t_int)
+        t_f = t_int + 1e-6
+
+        def one(x0, v0, xp, vp, t0):
+            qs, _, ns = solve(field, jnp.stack([x0, xp]), jnp.stack([v0, vp]), t0, t_f, t_f - (t_f - t0) * (1.0 - frac))
+            xs, rp = qs[:, 0], jnp.concatenate([xp[None], qs[:-1, 1]])  # particle after, progenitor before each interval
+            th0 = jnp.arctan2(x0[1], x0[0])
+            th = jnp.arctan2(xs[:, 1], xs[:, 0])
+            dphi = jnp.sum(_wrap(jnp.diff(jnp.concatenate([th0[None], th]))))
+            g = jnp.sum(jnp.linalg.norm(rp, axis=-1) - jnp.linalg.norm(xs, axis=-1))
+            return xs[-1], th0, dphi, g, ns
+
+        def pair(i):  # trailing (outer Lagrange point) first, then leading, as in the leapfrog version
+            a = one(xt[i], vt[i], x_sat[i], v_sat[i], ts[i])
+            b = one(xl[i], vl[i], x_sat[i], v_sat[i], ts[i])
+            return tuple(jnp.stack([ai, bi]) for ai, bi in zip(a, b))
+
+        xN, th0, dphi, g, ns = jax.lax.map(pair, jnp.arange(n_rel))
+        xN, th0, dphi, g, ns = xN.reshape(N, 3), th0.reshape(N), dphi.reshape(N), g.reshape(N), ns.reshape(N)
+        out = _finish(cfg, rep, host, acc_h, energy, xf, vf, t_int, x_sat, v_sat, tidal_ok, xN, th0, dphi, g)
+        out.update(solver_steps_prog=(n_back + n_fwd).astype(jnp.int32), solver_steps_max=jnp.max(ns).astype(jnp.int32),
+                   solver_steps_mean=jnp.mean(ns.astype(jnp.float64)).astype(jnp.float32))
         return out
 
     fn = jax.jit(jax.vmap(sim))
@@ -624,6 +761,7 @@ SUMMARY_KEYS = ("n_valid", "ang_len_deg", "ang_span_deg", "arc_len_kpc", "r_trac
                 "r_track_min", "r_track_max")
 FLAG_KEYS = ("unbound", "completed_orbit", "contiguous", "sel_ang", "sel_arc", "sel_rad", "sel_all")
 ALT_KEYS = tuple(f"alt_{k}" for k in TRACK_KEYS)
+SOLVER_KEYS = ("solver_steps_prog", "solver_steps_max", "solver_steps_mean")  # galax integrator only
 
 
 def track_summaries(count: np.ndarray, r_mean: np.ndarray, cfg: Config) -> dict:
@@ -661,7 +799,7 @@ def track_summaries(count: np.ndarray, r_mean: np.ndarray, cfg: Config) -> dict:
 
 def finalize(raw: dict, cfg: Config) -> dict:
     """Simulator output (numpy) -> everything stored per stream except the parameters."""
-    out = {k: raw[k] for k in TRACK_KEYS + DIAG_KEYS + ALT_KEYS + ("dissolved",) if k in raw}
+    out = {k: raw[k] for k in TRACK_KEYS + DIAG_KEYS + ALT_KEYS + SOLVER_KEYS + ("dissolved",) if k in raw}
     out.update(track_summaries(raw["count"], raw["r_mean"], cfg))
     unbound = ~(raw["E"] < 0)  # NaN energy counts as not bound
     failed = ~raw["prog_finite"] | (raw["n_bad"] >= cfg.n_particles) | ~np.isfinite(raw["E"])
@@ -696,8 +834,10 @@ class Simulator:
     """Simulates arbitrary stream indices in fixed-size batches (one compilation per batch size)."""
 
     def __init__(self, cfg: Config, batch: int | None = None):
-        self.cfg, self.fn = cfg, make_simulator(cfg)
-        self.batch = batch or cfg.batch_size or self._probe()
+        self.cfg = cfg
+        self.fn = make_simulator_galax(cfg) if cfg.integrator == "galax" else make_simulator(cfg)
+        # adaptive solves take a different number of steps per stream, and a batch waits for its slowest member
+        self.batch = batch or cfg.batch_size or (1 if cfg.integrator == "galax" else self._probe())
         self.compile_s = 0.0
 
     def _probe(self) -> int:
@@ -785,7 +925,7 @@ def write_shard(path: Path, cfg: Config, idx: np.ndarray, theta: np.ndarray, fin
         f.create_dataset("prog/dissolved", data=fin["dissolved"].astype(bool))
         f.create_dataset("prog/xy", data=np.stack([theta[:, 7], np.zeros(len(theta))], 1).astype(np.float32))
         f.create_dataset("prog/phi_deg", data=np.zeros(len(theta), np.float32))
-        for k in DIAG_KEYS:
+        for k in DIAG_KEYS + tuple(k for k in SOLVER_KEYS if k in fin):
             a = fin[k]
             f.create_dataset(f"diag/{k}", data=a if a.dtype.kind == "i" else a.astype(np.float32))
         for k in SUMMARY_KEYS:
@@ -872,7 +1012,7 @@ def write_manifest(cfg: Config, extra: dict | None = None) -> dict:
         n_streams=sum(s["n"] for s in shards), complete=sum(s["n"] for s in shards) == cfg.n_streams,
         theta_names=THETA_NAMES, status_bits=STATUS_BITS,
         phi_edges_deg=[-cfg.phi_max_deg, cfg.phi_max_deg, cfg.bin_deg],
-        versions={p: version(p) for p in ("galax", "jax", "unxt", "numpy", "h5py")},
+        versions={p: version(p) for p in ("galax", "galax.dynamics", "jax", "diffrax", "unxt", "numpy", "h5py")},
         streamax_commit=STREAMAX_COMMIT, shards=shards, **(extra or {}),
     )
     (ddir / "manifest.json").write_text(json.dumps(man, indent=1))
