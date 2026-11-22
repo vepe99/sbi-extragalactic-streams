@@ -153,6 +153,49 @@ def fig_acceptance(d, s, out) -> None:
         for k in ("all", "cut", "clean")}
 
 
+def fig_bound(d, s, out) -> None:
+    """The prior with and without the unbound draws, on one scale: each curve is the share of ALL draws per
+    bin, so the gap between the two is what removing the unbound progenitors takes away."""
+    a, th, m, dv = s["a"], s["th"], s["m"], s["derived"]
+    labels = [r"$\log_{10} M_{\rm halo}\ [M_\odot]$", r"$R_s$ [kpc]", r"$q$", r"$\cos i$", r"$\psi$ [rad]",
+              r"$\log_{10} m_{\rm prog}\ [M_\odot]$", r"$r_s$ [kpc]", r"$x_0$ [kpc]", r"$z_0$ [kpc]",
+              r"$v_{x0}$ [km/s]", r"$v_{y0}$ [km/s]", r"$v_{z0}$ [km/s]", r"$t_{\rm int}$ [Gyr]",
+              r"3D distance today $|x_0|$ [kpc]", r"speed today $|v_0|$ [km/s]",
+              r"speed / escape speed today (bound: below 1)"]
+    with np.errstate(all="ignore"):
+        v_esc_ratio = np.sqrt(np.maximum(1.0 + a["E"] / np.abs(a["Phi0"]), 0.0))
+    cols = [th[:, i] for i in range(13)] + [dv["r0"], dv["speed"], v_esc_ratio]
+    names = d.names + ["r0", "speed", "v_over_vesc"]
+    bound, n = m["bound"], len(th)
+    fig, axes = plt.subplots(4, 4, figsize=(14, 11))
+    ks = {}
+    for ax, x, lab, name in zip(axes.ravel(), cols, labels, names):
+        wide = name in ("x0", "z0", "vx0", "vy0", "vz0", "r0", "speed", "v_over_vesc")
+        lo, hi = np.nanpercentile(x, [0.5, 99.5] if name != "v_over_vesc" else [0, 97]) if wide else (x.min(), x.max())
+        edges = np.linspace(lo, hi, 41)
+        h_all, _ = np.histogram(x, bins=edges)
+        h_b, _ = np.histogram(x[bound], bins=edges)
+        ax.stairs(h_b / n, edges, color=C_CUT, fill=True, alpha=0.30, lw=0)
+        ax.stairs(h_b / n, edges, color=C_CUT, lw=1.8, label=f"bound only ({int(bound.sum()):,})")
+        ax.stairs(h_all / n, edges, color=C_ALL, lw=1.8, label=f"all prior draws ({n:,})")
+        ks[name] = ks_distance(x[np.isfinite(x)], bound[np.isfinite(x)])
+        ax.set_xlabel(lab)
+        ax.set_ylim(0, 1.2 * h_all.max() / n)  # headroom for the KS label
+        ax.set_yticks([])
+        ax.grid(False)
+        ax.text(0.97, 0.95, f"KS {ks[name]:.2f}", transform=ax.transAxes, ha="right", va="top", color=P.INK2, fontsize=8)
+    h, lab_ = axes[0, 0].get_legend_handles_labels()
+    fig.legend(h[::-1], lab_[::-1], loc="upper center", ncol=2, bbox_to_anchor=(0.5, 0.985))
+    fig.suptitle("The prior with and without the unbound draws (same scale: the gap between the curves is the unbound "
+                 "share; KS: distance between bound-only and full prior)", y=1.0, fontsize=10.5)
+    fig.tight_layout(rect=(0, 0, 1, 0.965))
+    P.save(fig, d, "prior_inspection/prior_bound_vs_all")
+    out["bound_vs_all"] = dict(bound_frac=float(bound.mean()), ks=ks,
+                               median_log10_M_halo=dict(all=float(np.median(th[:, 0])), bound=float(np.median(th[bound, 0]))),
+                               median_speed_kms=dict(all=float(np.median(dv["speed"])), bound=float(np.median(dv["speed"][bound]))),
+                               median_r0_kpc=dict(all=float(np.median(dv["r0"])), bound=float(np.median(dv["r0"][bound]))))
+
+
 def fig_maps(d, s, out) -> None:
     th, m, dv = s["th"], s["m"], s["derived"]
     pairs = [(th[:, 0], dv["speed"], r"$\log_{10} M_{\rm halo}\ [M_\odot]$", r"speed today $|v_0|$ [km/s]", (11, 14), (0, 900)),
@@ -397,7 +440,7 @@ def main() -> None:
     (d.pdir / "prior_inspection").mkdir(parents=True, exist_ok=True)
     s = load(d)
     out: dict = dict(n_streams=len(s["th"]), dE_max=DE_MAX)
-    for f in (fig_funnel, fig_acceptance, fig_maps, fig_integrator, fig_observable, fig_strrings):
+    for f in (fig_funnel, fig_bound, fig_acceptance, fig_maps, fig_integrator, fig_observable, fig_strrings):
         f(d, s, out)
     p = d.ddir / "prior_inspection.json"
     p.write_text(json.dumps(out, indent=1))
