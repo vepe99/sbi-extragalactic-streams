@@ -218,13 +218,74 @@ batch size), not a seeding problem. A dataset is exactly reproducible only at th
 - **Corner view of the bound fraction** (`corner_bound_vs_all`, `corner_bound_vs_all_focus`): being bound is
   decided by halo mass against speed; no other pair of parameters shows structure.
 
+## Particles, steps and progenitor state: tests for the next set (2026-11-22)
+
+Generator options added for this (defaults unchanged, 19 / 19 checks pass in both configurations):
+`--progenitor-mass-loss mixed` (each stream draws a surviving or a dissolved progenitor, stored in
+`prog/dissolved`), `--alt-ordering` (both orderings stored), the progenitor's sky position in `prog/xy`, and the
+Gibbons ordering zeroed on the progenitor. Six test sets with the same seed, mixed progenitor state, Gibbons
+ordering in `track/` and the C26 one in `track_alt/`, 48 single-core workers on a machine shared with another
+56-core job; `analysis/convergence.py`, `plots/convergence/convergence`, `data/convergence.json`.
+
+| set | steps | particles | streams | wall time | streams per core-second | 1,000,000 streams on 100 cores |
+|---|---|---|---|---|---|---|
+| `conv_p10` | 99 | 10,000 | 3,840 | 67 s | 1.19 | 2.3 h |
+| `conv_p30` | 99 | 30,000 | 3,840 | 151 s | 0.53 | 5.2 h |
+| `conv_p50` | 99 | 50,000 | 3,840 | 236 s | 0.34 | 8.2 h |
+| `conv_s399b` | 399 | 20,000 | 3,840 | 309 s | 0.26 | 10.7 h |
+| `conv_s399` | 399 | 30,400 | 3,840 | 481 s | 0.17 | 16.7 h |
+| `conv_s1999` | 1,999 | 32,000 | 1,920 | 992 s | 0.040 | 69 h |
+
+**Particles.** Share of the simulations that the StreaMAX-fit likelihood would accept as sampled well enough
+(at least 3 particles in every observed bin and model variance at most 1/9 of the data variance), median over
+the observed tracks of each length:
+
+| observed tracks of | 10,000 | 30,000 | 50,000 particles |
+|---|---|---|---|
+| 7 to 12 bins | 3.0 % | 6.0 % | 7.3 % |
+| 14 to 17 bins | 0.23 % | 0.63 % | 0.91 % |
+| 22 to 48 bins | 0.10 % | 0.23 % | 0.26 % |
+
+Bins with at least 50 particles per stream: 10.5, 15.7, 18.9. Monte Carlo error of the bin median in the bins
+valid at 10,000 particles: 0.9 %, 0.5 %, 0.4 % of the radius. 30,000 particles double the usable share for
+2.2 times the cost; 50,000 add a fifth to a half more for 1.6 times the cost of 30,000.
+
+**Steps.** Progenitor orbits with an energy error above 1 %:
+
+| | 99 steps | 399 steps | 1,999 steps |
+|---|---|---|---|
+| all draws | 29.7 % | 15.4 % | 4.0 % |
+| bound | 46.3 % | 24.3 % | 6.4 % |
+| bound, mean track radius below 47 kpc (the size of the observed streams) | 59.8 % | 30.1 % | 6.5 % |
+
+Change of the binned track (rms of the radius ratio minus 1 over the bins valid in both sets), share of streams
+changing by more than 4 %, the median error of the data; 1,920 common streams:
+
+| | resolved at 99 steps (1,349) | unresolved at 99 steps (571) | bound and small (306) | all |
+|---|---|---|---|---|
+| two particle realisations, 99 steps | 7.3 % | 64.7 % | 48.6 % | 27.6 % |
+| two particle realisations, 399 steps | 9.1 % | 46.9 % | 32.3 % | 21.3 % |
+| 99 against 399 steps | 6.2 % | 82.9 % | 43.9 % | 17.0 % |
+| 99 against 1,999 steps | 7.5 % | 79.6 % | 40.4 % | 16.2 % |
+| 399 against 1,999 steps | 5.0 % | 29.3 % | 24.2 % | 9.8 % |
+
+- Streams resolved at 99 steps do not depend on the step number: every comparison gives the 5 to 9 % that two
+  particle realisations give.
+- Streams unresolved at 99 steps do: four in five move by more than 4 % (median change 28 to 35 %) when the
+  steps are raised, and at 99 steps two realisations of the same stream disagree for two in three. These are
+  30 % of the prior and 60 % of the bound streams as small as the observed ones.
+- 399 steps are not enough for the small bound streams (30 % still unresolved, a quarter still moving by more
+  than 4 % towards 1,999 steps); 1,999 steps leave 6.5 %. Convergence beyond 1,999 steps was not tested.
+- The Gibbons ordering is the more stable of the two: 17 % of the tracks move by more than 4 % from 99 to 399
+  steps, against 26 % in the C26 ordering. Surviving and dissolved progenitors behave alike (16.7 % and 17.2 %).
+
 ## Figures (`plots/`; the pilot's are in `plots/pilot/`)
 
 `prior_marginals`, `energy`, `binned_values`, `gallery` (PDF, 3 pages; `gallery_p1..3.png`), `noise_examples`,
 `streamax_comparison`, `energy_conservation`; in `plots/prior_inspection/`: `funnel`, `prior_bound_vs_all`,
 `corner_bound_vs_all`, `corner_bound_vs_all_focus`, `acceptance`, `acceptance_maps`, `integrator`, `observable`,
 `strrings`, `strrings_neighbours_p1..4`, `strrings_neighbour_parameters`, `gallery_bound`, `gallery_unbound`,
-`bound_vs_unbound_tracks`. Each as PDF and PNG; all were looked at.
+`bound_vs_unbound_tracks`; in `plots/convergence/`: `convergence`. Each as PDF and PNG; all were looked at.
 
 ## What was read in StreaMAX, and where this differs from the prompt
 
@@ -288,6 +349,10 @@ StreaMAX's to the last digit).
 
 ## Not verified
 
+- No production set exists in the new configuration (mixed progenitor state, Gibbons ordering, more particles or
+  steps): only the six test sets of 1,920 to 3,840 streams. The neighbour comparison with the observed tracks
+  was not repeated for it. Convergence was not tested beyond 1,999 steps, and the test timings were taken on a
+  machine shared with another job.
 - Nothing has run on a GPU: the memory probe, the per-GPU worker launch and the GPU throughput are untested.
 - The resume path of `run` (no interruption happened) and `--cpu-workers` with several shards per worker or
   several cores per worker: the production run used 100 workers with one core and one shard each.

@@ -13,6 +13,8 @@ dataset is the starting point for testing whether an amortized posterior estimat
 - `scripts/extragalactic/plot.py`: figures
 - `analysis/inspect_prior.py`: prior inspection ahead of amortized inference (usable fraction, what the selection
   cuts do to the prior, where the integrator fails, the prior predictive against the STRRINGS streams)
+- `analysis/convergence.py`: how many particles and leapfrog steps a training set needs (reads the `conv_*` test
+  sets)
 - `outputs/extragalactic/C26_test/README.md`: data schema
 - `outputs/extragalactic/C26_test/report.md`: what was tested and run, and every StreaMAX detail looked up
 
@@ -49,6 +51,18 @@ On a many-core machine one JAX process does not use the cores well. `run --cpu` 
 `--cpu-workers N` (N worker processes, each with its own block of shards) and `--cpu-cores 0-47,64-111` (the
 cores shared out among them, in `taskset` syntax; each worker is pinned to its group). Without these two flags
 `run --cpu` starts a single unpinned worker, as before.
+
+Options beyond the C26 defaults, all in the `Config` dataclass:
+
+| flag | effect |
+|---|---|
+| `--n-steps N --n-particles M` | leapfrog steps and particles; `M` must be an even multiple of `N + 1` (StreaMAX releases `M / (N + 1)` particles at each of `N + 1` epochs) |
+| `--progenitor-mass-loss mixed --p-dissolved 0.5` | each stream draws its progenitor state: still there (constant mass, C26) or dissolved (mass ramped away, 2026b); stored in `prog/dissolved` |
+| `--track-ordering gibbons14` | the ordering of 2026b in `track/` (default: the C26 per-particle unwrapping) |
+| `--alt-ordering` | also store the track in the other ordering, in `track_alt/` |
+
+Each shard also stores the progenitor's sky position (`prog/xy`), which is `(x0, 0)` in the frame of the stored
+track; see the data schema. Sets made with such options go in their own `--subdir`.
 
 The resolved environments are pinned in `scripts/extragalactic/generate.py.lock` and `plot.py.lock`
 (`uv lock --script <file>`); `uv run --script` uses them.
