@@ -18,6 +18,11 @@ dataset is the starting point for testing whether an amortized posterior estimat
 
 Generated data (`outputs/**/data/`) and figures (`outputs/**/plots/`) are not tracked.
 
+## Decisions
+
+- **STRRINGS sample (2026-11-22, Giuseppe):** NGC1084, NGC1121 and PGC021008 are excluded from every comparison
+  and from inference; 32 of the 35 streams are used. Encoded as `STRRINGS_EXCLUDED` in `analysis/inspect_prior.py`.
+
 ## The five commands
 
 Only [uv](https://docs.astral.sh/uv/) is needed. Both scripts carry their environment in a PEP 723 header; uv

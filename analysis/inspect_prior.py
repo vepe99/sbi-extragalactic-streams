@@ -12,7 +12,13 @@ Questions asked of the prior:
   3. maps         where in parameter space the usable streams come from
   4. integrator   where the 99-step leapfrog does not resolve the progenitor orbit
   5. observable   what the network would receive: bins per track, coverage in angle, radial signal against noise
-  6. strrings     the prior predictive against the 35 STRRINGS streams (arXiv:2508.02154, table 4)
+  6. strrings     the prior predictive against the STRRINGS streams (arXiv:2508.02154, table 4)
+  7. corner       the prior with and without the unbound draws, pair by pair
+  8. neighbours   the simulated tracks closest to each STRRINGS stream, and the parameters they come from
+  9. boundness    bound against unbound streams among the usable ones: gallery and track summaries
+
+`--only funnel,corner,...` runs a subset (names: funnel, bound, acceptance, maps, integrator, observable, strrings,
+corner, neighbours, boundness).
 """
 
 import argparse
@@ -48,6 +54,15 @@ STRRINGS = [
     ("PGC938075", 1.8, 4.3, 0.1, 404.0), ("UGC01245", 74.8, 86.0, 11.1, 161.1), ("UGC01424", 75.8, 98.0, 2.4, 205.7),
     ("UGC01970", 28.2, 138.3, 5.8, 227.8), ("UGC08717", 68.6, 333.7, 5.1, 496.8), ("UGC09239", 81.9, 234.4, 8.7, 227.9),
 ]  # fmt: skip
+
+
+# Decision of 2026-11-22 (Giuseppe): these three STRRINGS streams are excluded from every comparison and from
+# any later inference. They stay in the table above and are drawn as open grey symbols where the sample is shown.
+STRRINGS_EXCLUDED = ("NGC1084_GROUP", "NGC1121", "PGC021008")
+OBS = [row for row in STRRINGS if row[0] not in STRRINGS_EXCLUDED]
+OBS_OUT = [row for row in STRRINGS if row[0] in STRRINGS_EXCLUDED]
+assert len(OBS_OUT) == len(STRRINGS_EXCLUDED)
+C_OBS = "#eda100"
 
 
 def binned_fraction(x, mask, edges):
@@ -271,8 +286,9 @@ def fig_integrator(d, s, out) -> None:
         ax.fill_between(ctr, f - e, f + e, color=col, alpha=0.22, lw=0)
         ax.plot(ctr, f, color=col, lw=2.0, label=lbl)
         by_ang[key] = [None if not np.isfinite(v) else float(v) for v in f]
-    o_ang = np.array([row[4] for row in STRRINGS])
-    ax.plot(np.clip(o_ang, 0, 535), np.full(len(o_ang), 0.03), "|", ms=14, mew=1.6, color=P.INK, label="STRRINGS angular extents")
+    o_ang = np.array([row[4] for row in OBS])
+    ax.plot(np.clip(o_ang, 0, 535), np.full(len(o_ang), 0.03), "|", ms=14, mew=1.6, color=P.INK,
+            label=f"STRRINGS angular extents ({len(OBS)})")
     ax.set_ylim(0, 1)
     ax.set_xlabel("angular length of the track [deg]  (observed values above 540 drawn at the edge)")
     ax.set_ylabel("fraction with energy error > 1 %")
@@ -356,8 +372,9 @@ def fig_observable(d, s, out) -> None:
 
 def fig_strrings(d, s, out) -> None:
     a, m = s["a"], s["m"]
-    obs = np.array([row[1:] for row in STRRINGS])
+    obs = np.array([row[1:] for row in OBS])
     o_len, o_ang = obs[:, 1], obs[:, 3]
+    out_len, out_ang = np.array([r[2] for r in OBS_OUT]), np.array([r[4] for r in OBS_OUT])
     o_rad = o_len / np.deg2rad(o_ang)  # radius of the circular arc with that length and angle
     has = m["has_bin"]
     sim_rad = a["arc_len_kpc"] / np.deg2rad(np.maximum(a["ang_len_deg"], 1e-6))
@@ -366,7 +383,8 @@ def fig_strrings(d, s, out) -> None:
     ex, ey = np.linspace(0, 720, 37), np.logspace(0, 3.6, 37)
     h, _, _ = np.histogram2d(a["ang_len_deg"][has], np.clip(a["arc_len_kpc"][has], 1, None), bins=[ex, ey])
     im = ax.pcolormesh(ex, ey, np.where(h > 0, h, np.nan).T, cmap=P.SEQ, norm=plt.matplotlib.colors.LogNorm(vmin=1, vmax=h.max()))
-    ax.plot(o_ang, o_len, "o", ms=6.5, color=P.INK, mfc="#eda100", mew=1.0, ls="none", label="STRRINGS (35 streams)")
+    ax.plot(o_ang, o_len, "o", ms=6.5, color=P.INK, mfc=C_OBS, mew=1.0, ls="none", label=f"STRRINGS ({len(OBS)} streams)")
+    ax.plot(out_ang, out_len, "o", ms=6.5, color=P.INK2, mfc="none", mew=1.0, ls="none", label=f"excluded ({len(OBS_OUT)})")
     ax.axvline(d.cfg["sel_ang_deg"], color=P.INK2, lw=1.0, ls=":")
     ax.axhline(d.cfg["sel_arc_kpc"], color=P.INK2, lw=1.0, ls=":")
     ax.set_yscale("log")
@@ -384,7 +402,7 @@ def fig_strrings(d, s, out) -> None:
         hh, e = np.histogram(x, bins=bins, weights=np.full(len(x), 1.0 / max(len(x), 1)))
         ax.stairs(hh, e, color=col, lw=2.0, label=lbl)
     ymax = ax.get_ylim()[1]
-    ax.plot(o_rad, np.full(len(o_rad), 0.04 * ymax), "|", ms=16, mew=1.6, color=P.INK, label="STRRINGS (35 streams)")
+    ax.plot(o_rad, np.full(len(o_rad), 0.04 * ymax), "|", ms=16, mew=1.6, color=P.INK, label=f"STRRINGS ({len(OBS)} streams)")
     ax.set_xscale("log")
     ax.set_xlabel("characteristic radius = track length / angle [kpc]")
     ax.set_ylabel("fraction of the group")
@@ -404,7 +422,7 @@ def fig_strrings(d, s, out) -> None:
     ax.barh(yy, np.maximum(near_res[order], 0.5), height=0.7, color=C_ALL, label="resolved orbit, no cut")
     ax.plot(np.maximum(near[order], 0.5), yy, "o", ms=5, color=C_CLEAN, mec=P.SURFACE, mew=0.8, ls="none",
             label="resolved orbit + the three cuts")
-    ax.set_yticks(yy, [STRRINGS[i][0] + (" *" if fails[i] else "") for i in order], fontsize=6.5)
+    ax.set_yticks(yy, [OBS[i][0] + (" *" if fails[i] else "") for i in order], fontsize=6.5)
     ax.set_xscale("log")
     ax.grid(axis="y", visible=False)
     ax.legend(loc="lower right")
@@ -417,7 +435,8 @@ def fig_strrings(d, s, out) -> None:
     P.save(fig, d, "prior_inspection/strrings")
     pct = lambda x: dict(zip(("p5", "p16", "p50", "p84", "p95"), [float(v) for v in np.nanpercentile(x, [5, 16, 50, 84, 95])]))
     out["strrings"] = dict(
-        n=len(STRRINGS),
+        n=len(OBS), excluded=list(STRRINGS_EXCLUDED),
+        obs_longer_than_270deg=int((o_ang > 270).sum()),
         obs_pass_ang_cut=int((o_ang > d.cfg["sel_ang_deg"]).sum()), obs_pass_arc_cut=int((o_len > d.cfg["sel_arc_kpc"]).sum()),
         obs_pass_both=int(((o_ang > d.cfg["sel_ang_deg"]) & (o_len > d.cfg["sel_arc_kpc"])).sum()),
         obs_char_radius_kpc=pct(o_rad), sim_char_radius_kpc_cut=pct(sim_rad[m["cut"]]), sim_char_radius_kpc_clean=pct(sim_rad[cl]),
@@ -425,24 +444,297 @@ def fig_strrings(d, s, out) -> None:
         frac_clean_char_radius_below_60=float((sim_rad[cl] < 60).mean()),
         frac_hasbin_char_radius_below_60=float((sim_rad[has] < 60).mean()),
         neighbours_per_observed_stream={r[0]: dict(resolved_no_cut=int(v0), resolved_and_cuts=int(v1), fails_c26_cuts=bool(f))
-                                        for r, v0, v1, f in zip(STRRINGS, near_res, near, fails)},
+                                        for r, v0, v1, f in zip(OBS, near_res, near, fails)},
         neighbours_median=dict(resolved_no_cut=float(np.median(near_res)), resolved_and_cuts=float(np.median(near))),
         n_observed_with_fewer_than_100_neighbours=dict(resolved_no_cut=int((near_res < 100).sum()), resolved_and_cuts=int((near < 100).sum())),
         n_observed_with_no_neighbour=dict(resolved_no_cut=int((near_res == 0).sum()), resolved_and_cuts=int((near == 0).sum())))
+
+
+# ------------------------------------------------------------------------------------------------------
+# 7. corner: the prior with and without the unbound draws
+# ------------------------------------------------------------------------------------------------------
+PAR_LABELS = [r"$\log_{10} M_{\rm halo}$", r"$R_s$ [kpc]", r"$q$", r"$\cos i$", r"$\psi$ [rad]",
+              r"$\log_{10} m_{\rm prog}$", r"$r_s$ [kpc]", r"$x_0$ [kpc]", r"$z_0$ [kpc]",
+              r"$v_{x0}$ [km/s]", r"$v_{y0}$ [km/s]", r"$v_{z0}$ [km/s]", r"$t_{\rm int}$ [Gyr]"]
+
+
+def corner_fraction(d, cols, labels, mask, name, title, nb=18, size=1.75) -> None:
+    """Corner layout. Diagonal: the two 1D distributions on one scale (share of all draws per bin). Below the
+    diagonal: the fraction of draws kept by `mask` in each 2D cell. A flat prior has no meaningful density
+    contour, so the pairs show the kept fraction instead of two sets of contours."""
+    n = len(cols)
+    rng = []
+    for x in cols:
+        lo, hi = np.nanpercentile(x, [0.5, 99.5])
+        flat = (x.max() - x.min()) < 1.25 * (hi - lo)  # bounded (uniform) parameter: use its full range
+        rng.append((float(x.min()), float(x.max())) if flat else (float(lo), float(hi)))
+    fig, axes = plt.subplots(n, n, figsize=(size * n + 0.8, size * n))
+    im = None
+    for i in range(n):
+        for j in range(n):
+            ax = axes[i, j]
+            if j > i:
+                ax.axis("off")
+                continue
+            ax.grid(False)
+            if i == j:
+                e = np.linspace(*rng[i], 31)
+                ha, _ = np.histogram(cols[i], bins=e)
+                hb, _ = np.histogram(cols[i][mask], bins=e)
+                ax.stairs(hb / len(mask), e, color=C_CUT, fill=True, alpha=0.30, lw=0)
+                ax.stairs(hb / len(mask), e, color=C_CUT, lw=1.5)
+                ax.stairs(ha / len(mask), e, color=C_ALL, lw=1.5)
+                ax.set_ylim(0, 1.1 * ha.max() / len(mask))
+                ax.set_yticks([])
+                ax.set_xlim(*rng[i])
+            else:
+                ex, ey = np.linspace(*rng[j], nb + 1), np.linspace(*rng[i], nb + 1)
+                na, _, _ = np.histogram2d(cols[j], cols[i], bins=[ex, ey])
+                nk, _, _ = np.histogram2d(cols[j][mask], cols[i][mask], bins=[ex, ey])
+                with np.errstate(all="ignore"):
+                    f = np.where(na >= 20, nk / na, np.nan)
+                im = ax.pcolormesh(ex, ey, f.T, cmap=P.SEQ, vmin=0, vmax=1, rasterized=True)
+            if i == n - 1:
+                ax.set_xlabel(labels[j], fontsize=8.5)
+                ax.tick_params(axis="x", labelsize=6.5, labelrotation=45)
+            else:
+                ax.set_xticklabels([])
+            if j == 0 and i > 0:
+                ax.set_ylabel(labels[i], fontsize=8.5)
+                ax.tick_params(axis="y", labelsize=6.5)
+            elif i != j:
+                ax.set_yticklabels([])
+    fig.subplots_adjust(left=0.07, right=0.93, bottom=0.07, top=0.95, wspace=0.07, hspace=0.07)
+    cax = fig.add_axes([0.945, 0.07, 0.012, 0.5])
+    fig.colorbar(im, cax=cax, label="fraction of the draws in the cell that are bound (cells with < 20 draws blank)")
+    h = [plt.Line2D([], [], color=C_ALL, lw=1.5, label=f"all prior draws ({len(mask):,})"),
+         plt.Line2D([], [], color=C_CUT, lw=1.5, label=f"bound only ({int(mask.sum()):,})")]
+    fig.legend(handles=h, loc="upper right", bbox_to_anchor=(0.93, 0.93), fontsize=10 if n > 6 else 9,
+               title="diagonal (same scale)")
+    fig.suptitle(title, fontsize=11 if n > 6 else 10, x=0.5, y=0.985)
+    P.save(fig, d, f"prior_inspection/{name}")
+
+
+def fig_corner(d, s, out) -> None:
+    th, m, dv = s["th"], s["m"], s["derived"]
+    corner_fraction(d, [th[:, i] for i in range(13)], PAR_LABELS, m["bound"], "corner_bound_vs_all",
+                    "The prior with and without the unbound draws: all 13 sampled parameters")
+    cols = [th[:, 0], th[:, 1], th[:, 2], dv["r0"], dv["speed"]]
+    labels = [PAR_LABELS[0], PAR_LABELS[1], PAR_LABELS[2], r"3D distance today $|x_0|$ [kpc]", r"speed today $|v_0|$ [km/s]"]
+    corner_fraction(d, cols, labels, m["bound"], "corner_bound_vs_all_focus",
+                    "The prior with and without the unbound draws: the quantities that decide it", nb=24, size=2.5)
+
+
+# ------------------------------------------------------------------------------------------------------
+# 8. nearest simulated neighbours of the STRRINGS streams
+# ------------------------------------------------------------------------------------------------------
+def neighbour_pool(s):
+    """Simulated tracks an observed stream can be compared with: a resolved orbit and one unbroken run of valid
+    bins (an observed track is one piece). No C26 cut, since half of the observed streams fail the length cut."""
+    a, m = s["a"], s["m"]
+    return m["has_bin"] & m["resolved"] & a["contiguous"].astype(bool)
+
+
+def neighbour_distance(a, length, angle):
+    """Distance in (length, angle): 0.2 dex in length counts as much as 30 deg in angle."""
+    la = np.log10(np.clip(a["arc_len_kpc"], 1e-3, None))
+    return np.hypot((la - np.log10(length)) / 0.2, (a["ang_len_deg"] - angle) / 30.0)
+
+
+def draw_track(ax, d, t, row, col) -> float:
+    """One binned track on the sky: mean radius of the valid bins, with the radial spread as a band. The
+    progenitor sits on the +x axis at phi = 0. Returns the largest radius drawn."""
+    valid = t["count"][row] >= d.cfg["n_valid_min"]
+    phi = np.deg2rad(d.phi[valid])
+    r, w = t["r_mean"][row][valid].astype(float), t["r_std"][row][valid].astype(float)
+    lo, hi = np.maximum(r - w, 0.0), r + w
+    ax.fill(np.concatenate([hi * np.cos(phi), (lo * np.cos(phi))[::-1]]),
+            np.concatenate([hi * np.sin(phi), (lo * np.sin(phi))[::-1]]), color=col, alpha=0.25, lw=0)
+    ax.plot(r * np.cos(phi), r * np.sin(phi), "-", color=col, lw=1.6)
+    i0 = int(np.argmin(np.abs(phi)))
+    ax.plot([r[i0] * np.cos(phi[i0])], [r[i0] * np.sin(phi[i0])], marker="*", ms=8, color=P.INK, mfc=C_OBS, mew=0.6, ls="none")
+    return float(hi.max())
+
+
+def fig_neighbours(d, s, out, k: int = 5, per_page: int = 8) -> None:
+    a, th, t, m = s["a"], s["th"], d.tracks, s["m"]
+    pool = neighbour_pool(s)
+    pool_idx = np.nonzero(pool)[0]
+    obs = sorted(OBS, key=lambda r: r[4])  # by angular extent: short arcs first, loops last
+    info = {}
+    pages = [obs[i : i + per_page] for i in range(0, len(obs), per_page)]
+    for ip, page in enumerate(pages, 1):
+        fig, axes = plt.subplots(len(page), k + 1, figsize=(2.45 * (k + 1), 2.6 * len(page)), squeeze=False)
+        for i, (name, dist, L, W, A) in enumerate(page):
+            dd = neighbour_distance(a, L, A)[pool_idx]
+            order = np.argsort(dd)[:k]
+            rows, dist_k = pool_idx[order], dd[order]
+            info[name] = dict(length_kpc=L, angle_deg=A, neighbours=[int(a["index"][r]) for r in rows],
+                              distance=[float(x) for x in dist_k], bound=[bool(m["bound"][r]) for r in rows],
+                              n_within_1=int((dd < 1).sum()))
+            # the observed stream as the circular arc with its length and angle (its image is not in this repo)
+            ax = axes[i, 0]
+            R = L / np.deg2rad(A)
+            ph = np.deg2rad(np.linspace(-A / 2, A / 2, 400))
+            rr = R * (1 + 0.04 * (ph - ph.min()) / (2 * np.pi))  # a slight spiral so that loops stay visible
+            ax.plot(rr * np.cos(ph), rr * np.sin(ph), color=P.INK, lw=max(1.2, 1.6))
+            lim = 1.1 * R
+            for jn, (r_, dk) in enumerate(zip(rows, dist_k), 1):
+                col = C_CUT if m["bound"][r_] else C_ALL
+                lim = max(lim, 1.08 * draw_track(axes[i, jn], d, t, r_, col))
+                axes[i, jn].set_title(f"#{int(a['index'][r_])}  d={dk:.2f}  {'bound' if m['bound'][r_] else 'unbound'}\n"
+                                      f"L={a['arc_len_kpc'][r_]:.0f} kpc, {a['ang_len_deg'][r_]:.0f}$^\\circ$, "
+                                      f"q={th[r_, 2]:.2f}, log M={th[r_, 0]:.1f}", fontsize=6.8)
+            ax.set_title(f"{name}\nL={L:.0f} kpc, {A:.0f}$^\\circ$, R={R:.0f} kpc  ({info[name]['n_within_1']:,} sims with d<1)",
+                         fontsize=6.8)
+            for ax in axes[i]:
+                ax.plot([0], [0], marker="+", ms=6, color=P.INK2)
+                ax.set_xlim(-lim, lim)
+                ax.set_ylim(-lim, lim)
+                ax.set_aspect("equal")
+                ax.tick_params(labelsize=6)
+        h = [plt.Line2D([], [], color=P.INK, lw=1.6, label="observed: circular arc with the stream's length and angle"),
+             plt.Line2D([], [], color=C_CUT, lw=1.6, label="simulated track, bound progenitor (band: radial spread)"),
+             plt.Line2D([], [], color=C_ALL, lw=1.6, label="simulated track, unbound progenitor"),
+             plt.Line2D([], [], marker="*", ms=9, color=P.INK, mfc=C_OBS, ls="none", label="progenitor today")]
+        fig.legend(handles=h, loc="upper center", ncol=4, bbox_to_anchor=(0.5, 0.995), fontsize=8)
+        fig.suptitle(f"Nearest simulated tracks to each STRRINGS stream in (length, angle); axes in kpc, one scale per row "
+                     f"(page {ip} of {len(pages)})", y=1.012, fontsize=9.5)
+        fig.tight_layout(rect=(0, 0, 1, 0.985))
+        P.save(fig, d, f"prior_inspection/strrings_neighbours_p{ip}")
+    out["strrings_neighbours"] = dict(pool="resolved orbit, contiguous valid bins, no C26 cut", pool_size=int(pool.sum()),
+                                      metric="hypot(dlog10(length)/0.2, dangle/30 deg)", per_stream=info)
+
+    # --- where in the prior do the neighbours come from: up to 100 per observed stream, all within d < 1
+    pick = []
+    for name, dist, L, W, A in obs:
+        dd = neighbour_distance(a, L, A)[pool_idx]
+        o = np.argsort(dd)[:100]
+        pick.append(pool_idx[o[dd[o] < 1]])
+    pick = np.concatenate(pick)
+    dv = s["derived"]
+    cols = [th[:, i] for i in range(13)] + [dv["r0"], dv["speed"], a["n_peri"].astype(float)]
+    labels = PAR_LABELS + [r"3D distance today $|x_0|$ [kpc]", r"speed today $|v_0|$ [km/s]", r"pericentres within $t_{\rm int}$"]
+    names = d.names + ["r0", "speed", "n_peri"]
+    fig, axes = plt.subplots(4, 4, figsize=(14, 11))
+    ksn = {}
+    for ax, x, lab, name in zip(axes.ravel(), cols, labels, names):
+        lo, hi = np.nanpercentile(x, [0.5, 99.5])
+        if (x.max() - x.min()) < 1.25 * (hi - lo):
+            lo, hi = x.min(), x.max()
+        e = np.arange(-0.5, 8.5) if name == "n_peri" else np.linspace(lo, hi, 31)
+        for xx, col, lbl in ((x, C_ALL, f"all prior draws ({len(x):,})"), (x[pool], P.INK2, f"comparison pool ({int(pool.sum()):,})"),
+                             (x[pick], C_CLEAN, f"neighbours of the {len(obs)} STRRINGS streams ({len(pick):,})")):
+            hh, _ = np.histogram(np.clip(xx, e[0], e[-1]), bins=e, density=True)
+            ax.stairs(hh, e, color=col, lw=1.2 if col == P.INK2 else 1.9, ls=":" if col == P.INK2 else "-", label=lbl)
+        sel = np.zeros(len(x), bool)
+        sel[np.unique(pick)] = True
+        ksn[name] = ks_distance(x, sel)
+        ax.text(0.97, 0.95, f"KS {ksn[name]:.2f}", transform=ax.transAxes, ha="right", va="top", color=P.INK2, fontsize=8)
+        ax.set_ylim(0, 1.25 * ax.get_ylim()[1])
+        ax.set_xlabel(lab)
+        ax.set_yticks([])
+        ax.grid(False)
+    fig.legend(*axes[0, 0].get_legend_handles_labels(), loc="upper center", ncol=3, bbox_to_anchor=(0.5, 0.985))
+    fig.suptitle("Where in the prior the STRRINGS-like tracks come from (up to 100 nearest per observed stream, d < 1; "
+                 "KS against the full prior)", y=1.0, fontsize=10.5)
+    fig.tight_layout(rect=(0, 0, 1, 0.965))
+    P.save(fig, d, "prior_inspection/strrings_neighbour_parameters")
+    out["strrings_neighbours"]["pooled"] = dict(
+        n=int(len(pick)), n_unique=int(len(np.unique(pick))), bound_frac=float(m["bound"][pick].mean()),
+        pass_c26_cuts_frac=float(m["cut"][pick].mean()), ks_vs_prior=ksn,
+        median=dict(log10_M_halo=float(np.median(th[pick, 0])), q=float(np.median(th[pick, 2])),
+                    r0_kpc=float(np.median(dv["r0"][pick])), speed_kms=float(np.median(dv["speed"][pick])),
+                    x0_kpc=float(np.median(th[pick, 7])), t_int=float(np.median(th[pick, 12]))))
+
+
+# ------------------------------------------------------------------------------------------------------
+# 9. bound against unbound among the usable streams
+# ------------------------------------------------------------------------------------------------------
+def fig_boundness(d, s, out, n_show: int = 12, seed: int = 1) -> None:
+    a, m, t = s["a"], s["m"], d.tracks
+    usable = m["clean"]
+    groups = (("bound", usable & m["bound"], C_CUT), ("unbound", usable & ~m["bound"], C_ALL))
+    # --- galleries from the streams with stored particles (the first 5,000), drawn with the figure script
+    have = np.isin(a["index"], d.particle_indices())
+    rng = np.random.default_rng(seed)
+    for name, mask, _ in groups:
+        idx = a["index"][mask & have]
+        ks = np.sort(rng.choice(idx, size=min(n_show, len(idx)), replace=False))
+        fig, axes = plt.subplots(4, 6, figsize=(25, 16.5))
+        for j, k_ in enumerate(ks):
+            P.draw_stream(d, axes[j // 3, 2 * (j % 3)], axes[j // 3, 2 * (j % 3) + 1], int(k_), tag=f"{name} ")
+        for j in range(len(ks), 12):
+            axes[j // 3, 2 * (j % 3)].axis("off")
+            axes[j // 3, 2 * (j % 3) + 1].axis("off")
+        P._legend_handles(fig)
+        fig.suptitle(f"{name.capitalize()} progenitors among the usable streams (three C26 cuts + resolved orbit): "
+                     f"{len(ks)} drawn at random from the {len(idx)} with stored particles", y=1.012, fontsize=11)
+        fig.tight_layout(rect=(0, 0, 1, 0.975))
+        fig.savefig(d.pdir / f"prior_inspection/gallery_{name}.png", dpi=110, bbox_inches="tight")
+        fig.savefig(d.pdir / f"prior_inspection/gallery_{name}.pdf", dpi=110, bbox_inches="tight")
+        plt.close(fig)
+        print(f"wrote {d.pdir / 'prior_inspection' / ('gallery_' + name)}.pdf / .png")
+    # --- track summaries of the two groups
+    valid = t["count"] >= d.cfg["n_valid_min"]
+    r = np.where(valid, t["r_mean"], np.nan).astype(np.float64)
+    with np.errstate(all="ignore"):
+        contrast = (np.nanmax(r, 1) - np.nanmin(r, 1)) / np.nanmean(r, 1)
+        relw = np.nanmedian(np.where(valid, t["r_std"] / t["r_mean"], np.nan), 1)
+        char_r = a["arc_len_kpc"] / np.deg2rad(np.maximum(a["ang_len_deg"], 1e-6))
+    o = np.array([row[1:] for row in OBS])
+    specs = [("angular length [deg]", a["ang_len_deg"], np.arange(90, 420, 10), False, o[:, 3]),
+             ("track length [kpc]", a["arc_len_kpc"], np.logspace(1.2, 3.3, 43), True, o[:, 1]),
+             ("characteristic radius = length / angle [kpc]", char_r, np.logspace(1, 2.8, 43), True, o[:, 1] / np.deg2rad(o[:, 3])),
+             (r"relative width, median $r_{\rm std}/r$", relw, np.logspace(-2, 0.2, 43), True, o[:, 2] / (o[:, 1] / np.deg2rad(o[:, 3]))),
+             (r"radial contrast $(r_{\max}-r_{\min})/\bar r$", contrast, np.logspace(-1, 0.8, 43), True, None),
+             (r"pericentres within $t_{\rm int}$", a["n_peri"].astype(float), np.arange(-0.5, 9.5), False, None)]
+    fig, axes = plt.subplots(2, 3, figsize=(15.5, 8))
+    stats = {}
+    for ax, (lab, x, bins, logx, rug) in zip(axes.ravel(), specs):
+        for name, mask, col in groups:
+            xx = np.clip(x[mask], bins[0], bins[-1])
+            hh, e = np.histogram(xx, bins=bins, weights=np.full(len(xx), 1.0 / max(len(xx), 1)))
+            ax.stairs(hh, e, color=col, lw=2.0, label=f"{name} ({int(mask.sum()):,})")
+            stats.setdefault(lab, {})[name] = [float(v) for v in np.nanpercentile(x[mask], [16, 50, 84])]
+        if rug is not None:
+            ax.plot(np.clip(rug, bins[0], bins[-1]), np.full(len(rug), 0.035 * ax.get_ylim()[1]), "|", ms=13, mew=1.5,
+                    color=P.INK, label=f"STRRINGS ({len(OBS)})")
+        if logx:
+            ax.set_xscale("log")
+        ax.set_xlabel(lab + "   (range clipped)")
+        ax.set_ylabel("fraction of the group")
+    axes[0, 0].legend(loc="upper right")
+    fig.suptitle("Bound against unbound progenitors among the usable streams (three C26 cuts + resolved orbit)", fontsize=10.5)
+    fig.tight_layout()
+    P.save(fig, d, "prior_inspection/bound_vs_unbound_tracks")
+    q = s["th"][:, 2]
+    out["bound_vs_unbound_usable"] = dict(
+        n=dict(bound=int(groups[0][1].sum()), unbound=int(groups[1][1].sum())), p16_p50_p84=stats,
+        contiguous_frac={n_: float(a["contiguous"][mk].mean()) for n_, mk, _ in groups},
+        frac_longer_than_180deg={n_: float((a["ang_len_deg"][mk] > 180).mean()) for n_, mk, _ in groups},
+        frac_char_radius_below_60kpc={n_: float((char_r[mk] < 60).mean()) for n_, mk, _ in groups},
+        no_pericentre_frac={n_: float((a["n_peri"][mk] == 0).mean()) for n_, mk, _ in groups},
+        q_mean={n_: float(q[mk].mean()) for n_, mk, _ in groups})
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--out", default="outputs/extragalactic/C26_test")
     ap.add_argument("--subdir", default="")
+    ap.add_argument("--only", default="", help="comma list of figure groups (see the module docstring)")
     arg = ap.parse_args()
     d = P.Data(REPO / arg.out, arg.subdir)
     (d.pdir / "prior_inspection").mkdir(parents=True, exist_ok=True)
     s = load(d)
-    out: dict = dict(n_streams=len(s["th"]), dE_max=DE_MAX)
-    for f in (fig_funnel, fig_bound, fig_acceptance, fig_maps, fig_integrator, fig_observable, fig_strrings):
-        f(d, s, out)
+    figs = dict(funnel=fig_funnel, bound=fig_bound, acceptance=fig_acceptance, maps=fig_maps, integrator=fig_integrator,
+                observable=fig_observable, strrings=fig_strrings, corner=fig_corner, neighbours=fig_neighbours,
+                boundness=fig_boundness)
     p = d.ddir / "prior_inspection.json"
+    out: dict = json.loads(p.read_text()) if (arg.only and p.exists()) else {}  # a subset updates the file
+    out.update(n_streams=len(s["th"]), dE_max=DE_MAX)
+    for name in [x for x in arg.only.split(",") if x] or list(figs):
+        figs[name](d, s, out)
     p.write_text(json.dumps(out, indent=1))
     print(f"wrote {p}")
 

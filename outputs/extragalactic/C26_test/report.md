@@ -185,20 +185,39 @@ batch size), not a seeding problem. A dataset is exactly reproducible only at th
 - **What the network receives.** 10 to 24 valid bins (5th to 95th percentile, median 16), with valid bins on both
   sides of the progenitor in 99.99 % of them; the radial contrast (r_max - r_min) / mean is 0.4 to 2.6
   (median 1.2), far above the 2 % noise.
-- **Against STRRINGS** (35 streams, arXiv:2508.02154 table 4, transcribed from the arXiv HTML and not checked
-  against the journal table; lengths and angles are measured differently in data and simulation). 16 of the 35
-  observed streams are shorter than the 100 kpc cut and 3 subtend less than 90 deg. Length / angle gives a
-  median radius of 35 kpc for the data (5th to 95th percentile 14 to 85) against 78 kpc (38 to 174) for the usable
-  simulations. Only 2.3 % of the simulations passing the cuts are longer than 270 deg, against 13 of the 35
-  observed streams. Counting simulations with a resolved orbit within 0.2 dex in length and 30 deg in angle of
-  each observed stream (no cut): median 1,079, fewer than 100 for 10 streams, none for 3 (NGC1121, PGC000902,
-  PGC938075). With the three cuts: median 59, none for 13.
+- **STRRINGS sample used: 32 of the 35 streams.** NGC1084, NGC1121 and PGC021008 are excluded (decision of
+  2026-11-22, Giuseppe; `STRRINGS_EXCLUDED` in `analysis/inspect_prior.py`). Every number below is for the 32.
+- **Against STRRINGS** (arXiv:2508.02154 table 4, transcribed from the arXiv HTML and not checked against the
+  journal table; lengths and angles are measured differently in data and simulation). 15 of the 32 observed
+  streams are shorter than the 100 kpc cut and 3 subtend less than 90 deg. Length / angle gives a median radius of
+  35 kpc for the data (5th to 95th percentile 16 to 77) against 78 kpc (38 to 174) for the usable simulations.
+  Only 2.3 % of the simulations passing the cuts are longer than 270 deg, against 10 of the 32 observed streams.
+  Counting simulations with a resolved orbit within 0.2 dex in length and 30 deg in angle of each observed
+  stream (no cut): median 1,128, fewer than 100 for 7 streams, none for 2 (PGC000902, PGC938075). With the three
+  cuts: median 106, none for 11.
+- **Nearest neighbours** (`strrings_neighbours_p1..4`, `strrings_neighbour_parameters`). Pool: resolved orbit and
+  contiguous valid bins, no C26 cut (55,674 tracks); distance = hypot(dlog10 length / 0.2, dangle / 30 deg). 24 of
+  the 32 streams have more than 50 tracks within distance 1 and a nearest neighbour closer than 0.35. NGC4256,
+  IC0120 and NGC1162 have 37, 17 and 13; NGC0804 has 1; PGC1001085, UGC08717, PGC000902 and PGC938075 have none
+  (nearest at distance 1.2, 3.0, 6.4 and 4.5). The neighbours (up to 100 per stream, 2,354 in all) come from a
+  narrow part of the prior: median projected distance x0 = 29 kpc (prior 101), 3D distance 100 kpc (177),
+  log10 M_halo 12.2, t_int 2.1 Gyr; 69 % are bound and 44 % pass the three cuts. Their q, cos i and psi follow the prior.
+- **Bound against unbound among the usable streams** (`gallery_bound`, `gallery_unbound`,
+  `bound_vs_unbound_tracks`). Length, angle and radius are alike (median angle 160 against 150 deg, radius 73
+  against 82 kpc). The width is not: the median radial width of a bin relative to its radius is 0.08 for the
+  bound (16th to 84th percentile 0.05 to 0.16) and 0.24 for the unbound (0.11 to 0.49). 82 % of the bound and
+  28 % of the unbound (2,775 streams) are thinner than 0.15. Unbound progenitors have at most one pericentre
+  (53 % none); the bound ones a median of two.
+- **Corner view of the bound fraction** (`corner_bound_vs_all`, `corner_bound_vs_all_focus`): being bound is
+  decided by halo mass against speed; no other pair of parameters shows structure.
 
 ## Figures (`plots/`; the pilot's are in `plots/pilot/`)
 
 `prior_marginals`, `energy`, `binned_values`, `gallery` (PDF, 3 pages; `gallery_p1..3.png`), `noise_examples`,
-`streamax_comparison`, `energy_conservation`; in `plots/prior_inspection/`: `funnel`, `acceptance`,
-`acceptance_maps`, `integrator`, `observable`, `strrings`. Each as PDF and PNG; all were looked at after the run.
+`streamax_comparison`, `energy_conservation`; in `plots/prior_inspection/`: `funnel`, `prior_bound_vs_all`,
+`corner_bound_vs_all`, `corner_bound_vs_all_focus`, `acceptance`, `acceptance_maps`, `integrator`, `observable`,
+`strrings`, `strrings_neighbours_p1..4`, `strrings_neighbour_parameters`, `gallery_bound`, `gallery_unbound`,
+`bound_vs_unbound_tracks`. Each as PDF and PNG; all were looked at.
 
 ## What was read in StreaMAX, and where this differs from the prompt
 
