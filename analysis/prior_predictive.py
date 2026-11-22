@@ -13,6 +13,9 @@ simulated track that covers all of its bins, in either sense of rotation. Three 
               radius, radial contrast, slope, curvature), among the simulations that cover its bins
   envelope    the observed radii against the prior predictive band of r(phi) on the same bins
   coverage    how many simulations cover each track and how many resemble it, split by progenitor state
+  joint       is the observed track inside the JOINT distribution of the simulated radii over its bins, not only
+              inside each bin's band: corner plots of the bins, and two rank tests per track (Mahalanobis
+              distance, distance to the nearest simulation). The simulations get the observed errors added.
 """
 
 import argparse
@@ -84,6 +87,96 @@ def summaries(phi: np.ndarray, r: np.ndarray) -> dict:
     return dict(mean_radius=r.mean(1), contrast=(r.max(1) - r.min(1)) / r.mean(1), slope=coef[1], curvature=coef[2])
 
 
+def joint_tests(o: dict, r: np.ndarray, rng, m_ref: int = 3000):
+    """Rank tests of the observed track in the joint distribution of ln r over its bins.
+
+    The simulated radii are first given the noise of the data (Gaussian, the observed fractional error of each
+    bin), so that both sides are 'observations'. Each test returns the fraction of simulations that are LESS
+    extreme than the observed track: values near 1 mean the data are in the far tail or outside.
+      maha        Mahalanobis distance from the simulated mean (covariance shrunk towards its diagonal)
+      maha_shape  the same after removing each track's mean ln r: shape only, not size
+      nn          distance to the nearest simulation, against each simulation's distance to its own nearest
+    -> the results and the noisy ln r of the simulations (for the corner plot)."""
+    n, d = r.shape
+    X = np.log(np.clip(r * (1.0 + (o["r_err"] / o["r"]) * rng.standard_normal(r.shape)), 1e-3, None))
+    x = np.log(o["r"])
+    out: dict = dict(n=n, d=d, maha=None, maha_shape=None, nn=None)
+
+    def maha(A, a):
+        mu, S = A.mean(0), np.atleast_2d(np.cov(A.T))
+        lam = float(np.clip(A.shape[1] / A.shape[0], 0.02, 0.5))
+        Si = np.linalg.inv((1 - lam) * S + lam * np.diag(np.diag(S)))
+        d2 = np.einsum("ni,ij,nj->n", A - mu, Si, A - mu)
+        return float((d2 < (a - mu) @ Si @ (a - mu)).mean())
+
+    if n >= 5 * d and n >= 50:
+        out["maha"] = maha(X, x)
+        out["maha_shape"] = maha((X - X.mean(1, keepdims=True))[:, :-1], (x - x.mean())[:-1])
+    if n >= 50:
+        Y = X[rng.choice(n, min(n, m_ref), replace=False)]
+        sq = (Y * Y).sum(1)
+        D2 = np.maximum(sq[:, None] + sq[None, :] - 2.0 * Y @ Y.T, 0.0) / d
+        np.fill_diagonal(D2, np.inf)
+        nn_sim = np.sqrt(D2.min(1))
+        nn_obs = float(np.sqrt(((Y - x) ** 2).mean(1).min()))
+        out.update(nn=float((nn_sim < nn_obs).mean()), nn_obs_rms=nn_obs, nn_sim_median_rms=float(np.median(nn_sim)))
+    return out, X
+
+
+def corner_bins(o: dict, X: np.ndarray, jt: dict, path: Path, max_bins: int = 8) -> None:
+    """Pairwise distributions of the simulated ln r over (up to `max_bins` of) the observed bins, with the
+    observed track marked. X already carries the observed noise."""
+    d = X.shape[1]
+    sel = np.unique(np.round(np.linspace(0, d - 1, min(d, max_bins))).astype(int))
+    k = len(sel)
+    L10 = X[:, sel] / np.log(10.0)
+    xo = np.log10(o["r"][sel])
+    lo, hi = np.percentile(L10, 0.5, axis=0), np.percentile(L10, 99.5, axis=0)
+    lo, hi = np.minimum(lo, xo - 0.08), np.maximum(hi, xo + 0.08)
+    fig, axes = plt.subplots(k, k, figsize=(1.75 * k + 0.6, 1.75 * k + 0.4), squeeze=False)
+    for i in range(k):
+        for j in range(k):
+            ax = axes[i, j]
+            if j > i:
+                ax.axis("off")
+                continue
+            ax.grid(False)
+            if i == j:
+                h, e = np.histogram(L10[:, i], bins=np.linspace(lo[i], hi[i], 31))
+                ax.stairs(h, e, color=P.C_ALL, fill=True, alpha=0.3, lw=0)
+                ax.stairs(h, e, color=P.C_ALL, lw=1.4)
+                ax.axvline(xo[i], color=P.INK, lw=1.6)
+                ax.set_yticks([])
+                ax.set_xlim(lo[i], hi[i])
+                ax.set_title(f"$\\phi$ = {o['phi'][sel[i]]:+.0f}$^\\circ$", fontsize=8)
+            else:
+                H, ex, ey = np.histogram2d(L10[:, j], L10[:, i], bins=[np.linspace(lo[j], hi[j], 26), np.linspace(lo[i], hi[i], 26)])
+                ax.pcolormesh(ex, ey, np.where(H > 0, H, np.nan).T, cmap=P.SEQ, rasterized=True)
+                ax.plot([xo[j]], [xo[i]], marker="o", ms=6.5, color=P.INK, mfc=I.C_OBS, mew=1.0, ls="none", zorder=5)
+                ax.set_xlim(lo[j], hi[j])
+                ax.set_ylim(lo[i], hi[i])
+            if i == k - 1:
+                ax.set_xlabel(r"$\log_{10} r$ [kpc]", fontsize=7.5)
+                ax.tick_params(axis="x", labelsize=6)
+            else:
+                ax.set_xticklabels([])
+            if j == 0 and i > 0:
+                ax.set_ylabel(r"$\log_{10} r$ [kpc]", fontsize=7.5)
+                ax.tick_params(axis="y", labelsize=6)
+            elif i != j:
+                ax.set_yticklabels([])
+    f = lambda v: "-" if v is None else f"{v:.2f}"
+    fig.suptitle(f"{o['name']}: {jt['n']:,} simulations covering its {jt['d']} bins ({k} shown), observed errors added\n"
+                 f"share of simulations less extreme than the data: Mahalanobis {f(jt['maha'])}, shape only "
+                 f"{f(jt['maha_shape'])}, nearest neighbour {f(jt['nn'])}", fontsize=9, y=0.995)
+    h = [plt.Line2D([], [], marker="o", ms=6.5, color=P.INK, mfc=I.C_OBS, ls="none", label="observed track"),
+         plt.Line2D([], [], color=P.C_ALL, lw=1.4, label="simulations (colour: number per cell)")]
+    fig.legend(handles=h, loc="upper right", bbox_to_anchor=(0.97, 0.9), fontsize=8.5)
+    fig.subplots_adjust(left=0.09, right=0.98, bottom=0.07, top=0.92, wspace=0.06, hspace=0.06)
+    fig.savefig(path, dpi=130, bbox_inches="tight")
+    plt.close(fig)
+
+
 SUMMARY_LABELS = dict(mean_radius="mean radius [kpc]", contrast=r"radial contrast $(r_{\max}-r_{\min})/\bar r$",
                       slope=r"slope $d\ln r/d\phi$ [1/rad]", curvature=r"curvature of $\ln r(\phi)$ [1/rad$^2$]")
 
@@ -93,6 +186,7 @@ def main() -> None:
     ap.add_argument("--out", default="outputs/extragalactic/C26_test")
     ap.add_argument("--subdir", default="")
     ap.add_argument("--ordering", default="c26", help="c26 or gibbons14")
+    ap.add_argument("--corner-min", type=int, default=150, help="corner plot for tracks covered by at least this many simulations")
     arg = ap.parse_args()
     root = REPO / arg.out
     ddir = root / "data" / arg.subdir if arg.subdir else root / "data"
@@ -204,6 +298,42 @@ def main() -> None:
         fig.savefig(pdir / f"coverage.{ext}", dpi=160, bbox_inches="tight")
     plt.close(fig)
 
+    # ---------------------------------------------------------------- 4. joint distribution over the bins
+    rng = np.random.default_rng(0)
+    jts = []
+    for (o, rows, r, dist, so, ss, q, band, diss) in res:
+        if len(rows) >= 50:
+            jt, X = joint_tests(o, r, rng)
+            if len(rows) >= arg.corner_min:
+                corner_bins(o, X, jt, pdir / f"corner_{o['name']}.png")
+        else:
+            jt = dict(n=len(rows), d=len(o["bins"]), maha=None, maha_shape=None, nn=None)
+        jts.append(jt)
+        out["per_track"][o["name"]]["joint"] = jt
+    tests = [("maha", "Mahalanobis distance"), ("maha_shape", "Mahalanobis distance, shape only"), ("nn", "distance to the nearest simulation")]
+    fig, axes = plt.subplots(1, 3, figsize=(13.5, 0.26 * len(obs) + 1.6), sharey=True)
+    for ax, (key, lab) in zip(axes, tests):
+        v = np.array([np.nan if jt[key] is None else jt[key] for jt in jts])
+        ax.axvspan(0.95, 1.03, color=P.GRID, alpha=0.8, lw=0)
+        ax.plot(v[v <= 0.95], y[v <= 0.95], "o", ms=6, color=P.C_ALL, mec=P.SURFACE, mew=0.8, ls="none")
+        ax.plot(v[v > 0.95], y[v > 0.95], "o", ms=6, color=P.C_BOUND, mec=P.SURFACE, mew=0.8, ls="none")
+        ax.plot(np.full(int(np.isnan(v).sum()), 0.5), y[np.isnan(v)], "x", ms=6, color=P.INK2, ls="none")
+        ax.set_xlim(-0.03, 1.03)
+        ax.set_xlabel("share of simulations less extreme than the data")
+        ax.set_title(lab, fontsize=9)
+        ax.grid(axis="y", visible=False)
+    axes[0].set_yticks(y, [f"{t[0]['name']} ({len(t[0]['bins'])} bins, {len(t[1]):,} sims)" for t in res], fontsize=6.8)
+    h = [plt.Line2D([], [], marker="o", ms=6, color=P.C_ALL, ls="none", label="inside the simulated distribution"),
+         plt.Line2D([], [], marker="o", ms=6, color=P.C_BOUND, ls="none", label="more extreme than 95 % of the simulations"),
+         plt.Line2D([], [], marker="x", ms=6, color=P.INK2, ls="none", label="too few simulations for the test")]
+    fig.legend(handles=h, loc="upper center", ncol=3, bbox_to_anchor=(0.5, 1.0), fontsize=8.5)
+    fig.suptitle("Is each observed track inside the joint distribution of the simulated radii over its bins? "
+                 "(observed errors added to the simulations)", y=1.045, fontsize=10)
+    fig.tight_layout(rect=(0, 0, 1, 0.97))
+    for ext in ("pdf", "png"):
+        fig.savefig(pdir / f"joint_tests.{ext}", dpi=160, bbox_inches="tight")
+    plt.close(fig)
+
     qs = np.array([[np.nan if t[6][k] is None else t[6][k] for k in keys] for t in res])
     out["summary"] = dict(
         tracks=len(obs), tracks_with_20_covering=int(sum(len(t[1]) >= 20 for t in res)),
@@ -211,7 +341,10 @@ def main() -> None:
         tracks_with_any_summary_outside_95pct=int(np.sum(np.nansum((qs < 0.025) | (qs > 0.975), axis=1) > 0)),
         tracks_without_sim_within_10pct=int(sum(p["n_within_10pct"] == 0 for p in pt)),
         tracks_with_100_within_10pct=int(sum(p["n_within_10pct"] >= 100 for p in pt)),
-        median_n_covering=float(np.median([p["n_covering"] for p in pt])))
+        median_n_covering=float(np.median([p["n_covering"] for p in pt])),
+        joint={key: dict(tested=int(sum(jt[key] is not None for jt in jts)),
+                         beyond_95pct=[t[0]["name"] for t, jt in zip(res, jts) if jt[key] is not None and jt[key] > 0.95])
+               for key, _ in tests})
     (ddir / "prior_predictive.json").write_text(json.dumps(out, indent=1))
     print(f"wrote {pdir}/summary_quantiles, envelopes, coverage (.pdf, .png) and {ddir / 'prior_predictive.json'}")
     print(json.dumps(out["summary"]))
