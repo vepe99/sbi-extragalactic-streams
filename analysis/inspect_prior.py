@@ -60,7 +60,8 @@ STRRINGS_WIDTH_KPC = {
     "UGC08717": 5.1, "UGC09239": 8.7,
 }  # fmt: skip
 C_OBS = "#eda100"
-N_COVER = 50  # particles a simulated bin needs to be compared with an observed one (coverage rule, data README)
+N_COVER = 50  # particles a simulated bin needs to be compared with an observed one (coverage rule, data README),
+# for 10,000 particles per stream; `main` scales it with the particle number of the set
 
 
 def fetch_strrings(dst: Path) -> None:
@@ -332,7 +333,7 @@ def fig_integrator(d, s, out) -> None:
         ax.stairs(h, e, color=col, lw=2.0, label=lbl)
     ax.axvline(np.log10(DE_MAX), color=P.INK2, lw=1.0, ls=":")
     ax.text(np.log10(DE_MAX), ax.get_ylim()[1] * 0.97, " 1 %", color=P.INK2, va="top", fontsize=8)
-    ax.set_xlabel(r"$\log_{10}$ relative energy error of the progenitor orbit, 99 steps")
+    ax.set_xlabel(r"$\log_{10}$ relative energy error of the progenitor orbit")
     ax.set_ylabel("fraction of the group")
     ax.legend(loc="upper left")
     ax = axes[1]
@@ -376,7 +377,9 @@ def fig_integrator(d, s, out) -> None:
     ax.set_xlabel("angular length of the track [deg]")
     ax.set_ylabel("fraction with energy error > 1 %")
     ax.legend(loc="upper left")
-    fig.suptitle("Where the 99-step leapfrog does not resolve the progenitor orbit", fontsize=10.5)
+    how = (f"the {d.cfg['n_steps']}-step leapfrog" if d.cfg.get("integrator", "leapfrog") == "leapfrog"
+           else f"galax's adaptive integrator (at most {d.cfg['max_steps']:,} steps)")
+    fig.suptitle(f"Where {how} does not resolve the progenitor orbit", fontsize=10.5)
     fig.tight_layout()
     P.save(fig, d, "prior_inspection/integrator")
     long = a["ang_len_deg"] > 270
@@ -820,6 +823,8 @@ def main() -> None:
     (d.pdir / "prior_inspection").mkdir(parents=True, exist_ok=True)
     d.a  # reads analysis.h5 and the configuration
     d.obs_dir = REPO / arg.out / "data" / "strrings"
+    global N_COVER
+    N_COVER = int(round(50 * d.cfg["n_particles"] / 10_000))
     s = load(d)
     figs = dict(funnel=fig_funnel, bound=fig_bound, acceptance=fig_acceptance, maps=fig_maps, integrator=fig_integrator,
                 observable=fig_observable, strrings=fig_strrings, corner=fig_corner, neighbours=fig_neighbours,

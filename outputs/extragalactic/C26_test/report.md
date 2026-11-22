@@ -279,6 +279,57 @@ changing by more than 4 %, the median error of the data; 1,920 common streams:
 - The Gibbons ordering is the more stable of the two: 17 % of the tracks move by more than 4 % from 99 to 399
   steps, against 26 % in the C26 ordering. Surviving and dissolved progenitors behave alike (16.7 % and 17.2 %).
 
+## galax's adaptive integrator against the leapfrog (2026-11-22)
+
+The generator now installs galax from GitHub main (commit `4c29842`, 199 commits after 0.1.0; `xmmutablemap`
+0.3.1, every other pin unchanged; a checkout is in `external/galax`, not tracked). The leapfrog path passes the
+19 checks under it (StreaMAX track comparison: z mean -0.02, std 0.96; the deterministic checks are identical).
+
+`--integrator galax` integrates everything with galax's `OrbitSolver`, i.e. diffrax Dopri8 with a PID step-size
+controller (`--rtol 1e-7`, galax's default) and at most `--max-steps 1999` steps per solve:
+
+- progenitor: from today back to -t_int and forward on the release times;
+- release: galax `FardalStreamDF`, one leading and one trailing particle at each of n_particles / 2 times
+  uniform over [-t_int, 0] (15,000 release times for 30,000 particles, against the 100 to 2,000 epochs of
+  StreaMAX);
+- particles: each solved from its release to today together with its own copy of the progenitor, as galax's
+  `MockStreamGenerator` does with a `progenitor_potential`. The field (`StreamField` in `generate.py`) is
+  written here because galax's generator returns final positions only and a constant progenitor mass; the
+  unwrapped angle and the Gibbons coordinate need points along each path (`--n-steps` of them, uniform in
+  time) and the 2026b model needs the mass ramp;
+- a solve that would need more than `--max-steps` steps returns non-finite values: the particle is counted in
+  `diag/n_bad`, and a progenitor orbit that fails sets the stream's `failed` status bit. Steps taken are stored
+  in `diag/solver_steps_prog`, `solver_steps_mean`, `solver_steps_max`.
+
+Test set `conv_galax`: the 1,920 prior draws of `conv_s1999`, 30,000 particles, mixed progenitor state, 64
+single-core workers, batch 1, 1,186 s wall; `plots/convergence/galax_integrator`, `data/convergence.json`.
+
+| | leapfrog 99 | leapfrog 399 | leapfrog 1,999 | galax adaptive |
+|---|---|---|---|---|
+| core-seconds per stream (about 30,000 particles) | 1.2 | 4.3 | 20.3 | 16.7 (shards: 7.7 to 37) |
+| progenitor energy error above 1 % | 29.7 % | 15.4 % | 4.0 % | 0 % (largest 8e-7, median 3e-9) |
+| fit's sampling guards accept, observed tracks of 7-12 / 14-17 / 22-48 bins | 6.0 / 0.63 / 0.23 % | - | 7.4 / 1.4 / 0.63 % | 7.2 / 1.1 / 0.57 % |
+
+Steps taken by the adaptive solver, percentiles 50 / 90 / 99 / max over the streams: progenitor orbit (back and
+forth) 40 / 605 / 2,240 / 3,998; mean over a stream's particles 14 / 181 / 713 / 1,999; largest of a stream
+36 / 468 / 1,747 / 1,999. 12 streams (0.6 %) have a solve at the cap: 4 lose the progenitor orbit and count as
+failed, 8 lose some particles.
+
+Share of streams whose binned track differs from the galax one by more than 4 % (rms radius ratio minus 1):
+
+| | resolved at 99 leapfrog steps | unresolved at 99 steps | bound, as small as the data | all |
+|---|---|---|---|---|
+| leapfrog 99 against galax | 9.9 % | 82.1 % | 44.2 % | 19.3 % |
+| leapfrog 399 against galax | 7.9 % | 34.2 % | 27.2 % | 13.2 % |
+| leapfrog 1,999 against galax | 7.8 % | 24.7 % | 22.0 % | 12.0 % |
+| two leapfrog realisations at 399 steps (particle noise) | 9.1 % | 46.9 % | 32.3 % | 21.3 % |
+
+The leapfrog converges towards the galax tracks as its steps are raised, and where the leapfrog is resolved
+the two agree to within particle noise. The cost is that of 1,999 leapfrog steps: the adaptive solver takes far
+fewer steps (a median of 14 per particle) but each Dopri8 step is 13 force evaluations on a two-body state,
+steps are rejected, and the solves run one particle at a time. Not tested: a looser tolerance, a cheaper
+solver (Tsit5, Dopri5), a larger step cap, and galax's own `MockStreamGenerator.run` end to end.
+
 ## Figures (`plots/`; the pilot's are in `plots/pilot/`)
 
 `prior_marginals`, `energy`, `binned_values`, `gallery` (PDF, 3 pages; `gallery_p1..3.png`), `noise_examples`,

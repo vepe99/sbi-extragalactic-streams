@@ -4,7 +4,8 @@
 
 Reads the test sets data/conv_p10, conv_p30, conv_p50 (99 steps; 10,000 / 30,000 / 50,000 particles),
 data/conv_s399, conv_s1999 (about 30,000 particles; 399 / 1,999 steps) and conv_s399b (399 steps, 20,000
-particles: a second particle realisation at 399 steps), all made with the same seed, so stream k
+particles: a second particle realisation at 399 steps) and, if present, conv_galax (galax's adaptive
+integrator, 30,000 particles, at most 1,999 steps per solve), all made with the same seed, so stream k
 has the same parameters and the same progenitor state in every set. Writes plots/convergence/ and
 data/convergence.json.
 
@@ -47,6 +48,10 @@ def load_set(ddir: Path) -> dict:
                                 r_med_alt="track_alt/r_med", dE="diag/dE_rel", n_peri="diag/n_peri",
                                 unbound="flags/unbound").items():
                 cols.setdefault(k, []).append(h[path][:])
+            for k in ("solver_steps_prog", "solver_steps_max", "solver_steps_mean", "n_bad"):
+                if k in h["diag"]:
+                    cols.setdefault(k, []).append(h["diag"][k][:])
+            cols.setdefault("status", []).append(h["status"][:])
     if cfg is None:
         raise SystemExit(f"no shards in {ddir}")
     d = {k: np.concatenate(v) for k, v in cols.items()}
@@ -54,7 +59,8 @@ def load_set(ddir: Path) -> dict:
     d = {k: v[o] for k, v in d.items()}
     man = json.loads((ddir / "manifest.json").read_text())
     d.update(cfg=cfg, N=cfg["n_particles"], steps=cfg["n_steps"], wall_s=man["run"]["wall_s"],
-             workers=len(man["run"]["devices"]), n=len(d["index"]))
+             workers=len(man["run"]["devices"]), n=len(d["index"]),
+             shard_s_per_stream=np.array([sh["wall_s"] / sh["n"] for sh in man["shards"]]))
     d["valid"] = d["count"] >= FRAC_VALID * d["N"]
     with np.errstate(all="ignore"):
         d["r_mean_track"] = np.nanmean(np.where(d["valid"], d["r_med"], np.nan), axis=1)
@@ -89,6 +95,112 @@ def fit_accepts(sim: dict, o: dict, nb: int, var_ratio: float = 9.0) -> np.ndarr
 def frac_above(x, thr):
     x = x[np.isfinite(x)]
     return float((x > thr).mean()) if len(x) else float("nan")
+
+
+def galax_figure(root, pdir, S, obs, nb, chg, groups, out) -> None:
+    """galax's adaptive integrator against the fixed-step leapfrog, on the same prior draws."""
+    gx = load_set(root / "data" / "conv_galax")
+    n0 = min(gx["n"], S["s1999"]["n"])
+    pairs = [("floor399", None, None, "two particle realisations, leapfrog 399 steps", P.INK2, "--"),
+             ("99_gx", "p30", gx, "leapfrog 99 steps against galax", P.C_ALL, "-"),
+             ("399_gx", "s399", gx, "leapfrog 399 steps against galax", P.C_BOUND, "-"),
+             ("1999_gx", "s1999", gx, "leapfrog 1,999 steps against galax", P.C_PASS, "-")]
+    c = {name: (chg[name] if a is None else track_change(S[a], b)) for name, a, b, *_ in pairs}
+    c_alt = {name: track_change(S[a], b, "r_med_alt", "count_alt") for name, a, b, *_ in pairs if a is not None}
+    failed = (gx["status"][:n0] & 16) > 0
+    pct = lambda x, q=(50, 90, 99, 100): [float(v) for v in np.nanpercentile(x, q)]
+    # per-shard wall times: a worker whose shard is done sits idle, so the run's wall time overstates the cost
+    cost = {k: float(np.mean(S[k]["shard_s_per_stream"])) for k in ("p30", "s399", "s1999")}
+    cost["galax"] = float(np.mean(gx["shard_s_per_stream"]))
+    acc = {k: {o["name"]: float(fit_accepts(d, o, nb).mean()) for o in obs} for k, d in (("p30", S["p30"]), ("s1999", S["s1999"]), ("galax", gx))}
+    classes = [("7-12 bins", lambda o: len(o["bins"]) <= 12), ("14-17 bins", lambda o: 13 <= len(o["bins"]) <= 17),
+               ("22-48 bins", lambda o: len(o["bins"]) >= 22 and o["name"] != "PGC938075")]
+    out["galax"] = dict(
+        n_streams=gx["n"], n_particles=gx["N"], max_steps=gx["cfg"]["max_steps"], rtol=gx["cfg"]["rtol"],
+        wall_s=gx["wall_s"], workers=gx["workers"], core_s_per_stream=cost,
+        shard_core_s_per_stream=pct(gx["shard_s_per_stream"], (0, 50, 90, 100)),
+        energy_error_p50_p90_p99_max=pct(gx["dE"]), unresolved_energy=float((gx["dE"] >= 1e-2).mean()),
+        failed_streams=int(failed.sum()), streams_with_nonfinite_particles=int((gx["n_bad"] > 0).sum()),
+        mean_nonfinite_particle_fraction=float(gx["n_bad"].mean() / gx["N"]),
+        solver_steps=dict(progenitor=pct(gx["solver_steps_prog"]), particle_mean=pct(gx["solver_steps_mean"]),
+                          particle_max=pct(gx["solver_steps_max"]),
+                          streams_with_a_solve_at_the_cap=int((gx["solver_steps_max"] >= gx["cfg"]["max_steps"]).sum())),
+        track_change={name: {g: dict(median=float(np.nanmedian(c[name][:n0][m[:n0]])), above_4pct=frac_above(c[name][:n0][m[:n0]], 0.04),
+                                     above_10pct=frac_above(c[name][:n0][m[:n0]], 0.10))
+                             for g, m in groups.items()} for name in c},
+        track_change_c26_ordering={name: dict(median=float(np.nanmedian(v[:n0])), above_4pct=frac_above(v[:n0], 0.04)) for name, v in c_alt.items()},
+        fit_acceptance_median={lab: {k: float(np.median([acc[k][o["name"]] for o in obs if sel(o)])) for k in acc} for lab, sel in classes})
+
+    fig, axes = plt.subplots(2, 3, figsize=(17, 9.6))
+    for ax, g, title in ((axes[0, 0], "all", "all draws"), (axes[0, 1], "data_like_bound", "bound streams as small as the observed ones")):
+        for name, a_, b_, lbl, col, ls in pairs:
+            x = c[name][:n0][groups[g][:n0]]
+            x = np.sort(x[np.isfinite(x)])
+            ax.plot(x, 1.0 - np.arange(1, len(x) + 1) / len(x), color=col, lw=2.0, ls=ls, label=lbl)
+        ax.axvline(DATA_ERR, color=P.INK2, lw=1.0, ls=":")
+        ax.set_xscale("log")
+        ax.set_xlim(2e-3, 3)
+        ax.set_ylim(0, 1)
+        ax.set_xlabel("difference of the binned tracks, rms of the radius ratio minus 1")
+        ax.set_ylabel("fraction of streams differing by more")
+        ax.set_title(f"Tracks: {title}", fontsize=9.5)
+    axes[0, 0].legend(loc="upper right")
+    axes[0, 0].text(DATA_ERR, 0.03, " data error 4 %", color=P.INK2, fontsize=8)
+    ax = axes[0, 2]
+    bins = np.linspace(-12, 2, 57)
+    for k, d, col, lbl in (("p30", S["p30"], P.C_ALL, "leapfrog, 99 steps"), ("s399", S["s399"], P.C_BOUND, "leapfrog, 399 steps"),
+                           ("s1999", S["s1999"], P.C_PASS, "leapfrog, 1,999 steps"), ("gx", gx, P.INK, "galax, adaptive")):
+        x = np.log10(np.clip(d["dE"][:n0], 1e-12, 1e2))
+        h, e = np.histogram(x, bins=bins, weights=np.full(len(x), 1.0 / len(x)))
+        ax.stairs(h, e, color=col, lw=2.0, label=lbl)
+    ax.axvline(-2, color=P.INK2, lw=1.0, ls=":")
+    ax.set_xlabel(r"$\log_{10}$ relative energy error of the progenitor orbit")
+    ax.set_ylabel("fraction of streams")
+    ax.set_title("Energy conservation")
+    ax.legend(loc="upper right")
+    ax = axes[1, 0]
+    bins = np.logspace(0, np.log10(max(gx["cfg"]["max_steps"], 2000)), 50)
+    for key, col, lbl in (("solver_steps_prog", P.C_ALL, "progenitor orbit (back and forth)"),
+                          ("solver_steps_mean", P.C_BOUND, "particles, mean of a stream"),
+                          ("solver_steps_max", P.C_PASS, "particles, largest of a stream")):
+        x = np.clip(gx[key].astype(float), bins[0], bins[-1])
+        h, e = np.histogram(x, bins=bins, weights=np.full(len(x), 1.0 / len(x)))
+        ax.stairs(h, e, color=col, lw=2.0, label=f"{lbl} (median {np.median(gx[key]):.0f})")
+    ax.axvline(gx["cfg"]["max_steps"], color=P.INK2, lw=1.0, ls=":")
+    ax.text(gx["cfg"]["max_steps"], ax.get_ylim()[1] * 0.97, "cap ", color=P.INK2, va="top", ha="right", fontsize=8)
+    ax.set_xscale("log")
+    ax.set_xlabel("steps taken by the adaptive solver (accepted and rejected)")
+    ax.set_ylabel("fraction of streams")
+    ax.set_title("galax: how many steps the adaptive solver takes")
+    ax.legend(loc="upper left")
+    ax = axes[1, 1]
+    labs = ["leapfrog\n99", "leapfrog\n399", "leapfrog\n1,999", "galax\nadaptive"]
+    vals = [cost["p30"], cost["s399"], cost["s1999"], cost["galax"]]
+    ax.bar(np.arange(4), vals, width=0.62, color=[P.C_ALL, P.C_BOUND, P.C_PASS, P.INK2])
+    for i, v in enumerate(vals):
+        ax.text(i, v, f"{v:.1f}", ha="center", va="bottom", fontsize=9, color=P.INK)
+    ax.set_xticks(np.arange(4), labs)
+    ax.grid(axis="x", visible=False)
+    ax.set_ylabel("core-seconds per stream (about 30,000 particles)")
+    ax.set_title("Cost (not all sets ran under the same machine load)")
+    ax = axes[1, 2]
+    npr = np.minimum(S["s1999"]["n_peri"][:n0], 6)
+    xi = np.arange(7)
+    for name, a_, b_, lbl, col, ls in pairs:
+        ys = [frac_above(c[name][:n0][npr == i], 0.04) for i in xi]
+        ax.plot(xi, ys, "o", ls=ls, color=col, lw=2.0, ms=6, mfc=P.SURFACE, mew=1.6, label=lbl)
+    ax.set_xticks(xi, [str(i) for i in xi[:-1]] + ["6+"])
+    ax.set_ylim(0, 1)
+    ax.set_xlabel(r"pericentre passages within $t_{\rm int}$")
+    ax.set_ylabel("fraction of streams whose track differs by more than 4 %")
+    ax.set_title("Where the integrators disagree")
+    fig.suptitle(f"galax's adaptive integrator (Dopri8, rtol {gx['cfg']['rtol']:g}, at most {gx['cfg']['max_steps']:,} steps) against the "
+                 f"fixed-step leapfrog, {n0:,} prior draws, about 30,000 particles", fontsize=10.5)
+    fig.tight_layout()
+    for ext in ("pdf", "png"):
+        fig.savefig(pdir / f"galax_integrator.{ext}", dpi=160, bbox_inches="tight")
+    plt.close(fig)
+    print(f"wrote {pdir / 'galax_integrator'}.pdf / .png")
 
 
 def main() -> None:
@@ -226,6 +338,8 @@ def main() -> None:
     for ext in ("pdf", "png"):
         fig.savefig(pdir / f"convergence.{ext}", dpi=160, bbox_inches="tight")
     plt.close(fig)
+    if (root / "data" / "conv_galax" / "manifest.json").exists():
+        galax_figure(root, pdir, S, obs, nb, chg, groups, out)
     (root / "data" / "convergence.json").write_text(json.dumps(out, indent=1))
     print(f"wrote {pdir / 'convergence'}.pdf / .png and {root / 'data' / 'convergence.json'}")
 

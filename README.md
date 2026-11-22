@@ -34,7 +34,7 @@ Generated data (`outputs/**/data/`) and figures (`outputs/**/plots/`) are not tr
 
 Only [uv](https://docs.astral.sh/uv/) is needed. Both scripts carry their environment in a PEP 723 header; uv
 fetches Python 3.12 and every package (network access and git are required: StreaMAX is installed from GitHub
-at a pinned commit).
+at a pinned commit, and so is galax, from its main branch).
 
 ```bash
 uv run --script scripts/extragalactic/generate.py test --cpu --n-test-streams 96   # 19 checks, under a minute
@@ -58,6 +58,7 @@ Options beyond the C26 defaults, all in the `Config` dataclass:
 |---|---|
 | `--n-steps N --n-particles M` | leapfrog steps and particles; `M` must be an even multiple of `N + 1` (StreaMAX releases `M / (N + 1)` particles at each of `N + 1` epochs) |
 | `--progenitor-mass-loss mixed --p-dissolved 0.5` | each stream draws its progenitor state: still there (constant mass, C26) or dissolved (mass ramped away, 2026b); stored in `prog/dissolved` |
+| `--integrator galax --max-steps 1999 --rtol 1e-7` | integrate the progenitor and every particle with galax's adaptive integrator (diffrax Dopri8) instead of the fixed-step leapfrog; one leading and one trailing particle per release time; use `--batch-size 1` |
 | `--track-ordering gibbons14` | the ordering of 2026b in `track/` (default: the C26 per-particle unwrapping) |
 | `--alt-ordering` | also store the track in the other ordering, in `track_alt/` |
 
