@@ -13,6 +13,8 @@ dataset is the starting point for testing whether an amortized posterior estimat
 - `scripts/extragalactic/plot.py`: figures
 - `analysis/inspect_prior.py`: prior inspection ahead of amortized inference (usable fraction, what the selection
   cuts do to the prior, where the integrator fails, the prior predictive against the STRRINGS streams)
+- `analysis/prior_predictive.py`: prior predictive checks of a set (finished or partial) against the observed
+  STRRINGS tracks
 - `analysis/convergence.py`: how many particles and leapfrog steps a training set needs (reads the `conv_*` test
   sets)
 - `outputs/extragalactic/C26_test/README.md`: data schema
@@ -58,6 +60,7 @@ Options beyond the C26 defaults, all in the `Config` dataclass:
 |---|---|
 | `--n-steps N --n-particles M` | leapfrog steps and particles; `M` must be an even multiple of `N + 1` (StreaMAX releases `M / (N + 1)` particles at each of `N + 1` epochs) |
 | `--progenitor-mass-loss mixed --p-dissolved 0.5` | each stream draws its progenitor state: still there (constant mass, C26) or dissolved (mass ramped away, 2026b); stored in `prog/dissolved` |
+| `--solver dopri5` | with `--integrator galax`: the diffrax solver (`dopri8` is galax's default; also `tsit5`) |
 | `--integrator galax --max-steps 1999 --rtol 1e-7` | integrate the progenitor and every particle with galax's adaptive integrator (diffrax Dopri8) instead of the fixed-step leapfrog; one leading and one trailing particle per release time; use `--batch-size 1` |
 | `--track-ordering gibbons14` | the ordering of 2026b in `track/` (default: the C26 per-particle unwrapping) |
 | `--alt-ordering` | also store the track in the other ordering, in `track_alt/` |

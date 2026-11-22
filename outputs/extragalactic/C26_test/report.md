@@ -367,6 +367,33 @@ order), whose sort key does not order particles released at different times alon
 only the bins of the observed track, where this matters less; a prior-wide training set is more exposed. Both
 orderings are stored, so the choice can be made later; the galleries above use the Gibbons one.
 
+## The 500,000-stream training set `train_v1` (started 2026-11-22 21:24)
+
+Settings, chosen with the user: galax integrator with **Dopri5**, tolerance **1e-6** (one order looser than
+galax's default), at most **2,500** steps per solve; 30,000 particles; mixed progenitor state (`prog/dissolved`
+says whether a stream was made with the mass ramp); C26 ordering in `track/`, Gibbons in `track_alt/`; shards of
+250; particles saved for the first 10,000 streams. Command: `data/train_v1/launch.sh` (rerun it to resume);
+112 single-core workers on cores 0-7, 9-56, 65-79, 81-105, 107-122, `nice -n 10`, detached with `nohup setsid`;
+code at commit `a212b8a`.
+
+Tests behind the settings, 960 prior draws each at 30,000 particles (`--solver` was added for them):
+
+| step cap | core-seconds per stream | streams failed | bound | bound, x0 < 70 kpc | 6 or more pericentres |
+|---|---|---|---|---|---|
+| 400 | 9.5 | 10.2 % | 16.1 % | 27.7 % | 57.1 % |
+| 1,000 | 10.1 | 2.4 % | 3.8 % | 11.2 % | 13.5 % |
+| 2,500 | 9.8 | 0.2 % | 0.3 % | 1.0 % | 1.2 % |
+
+The cap does not change the cost: a failed stream still runs every particle to the cap, and most streams need
+far fewer steps (mean per particle: median 18, 90th percentile 233, 99th percentile 865 at the 2,500 cap). The
+saving against Dopri8 at 1e-7 (16.7 core-seconds per stream) comes from the solver and the tolerance. With
+Dopri5 at 1e-6 the energy error of the streams that finish is at most 6e-5 and their C26 tracks agree with
+the Dopri8 ones to well under 1 % (same particle draws). 99 or 399 path samples for the unwrapped angle make
+no difference. The user first asked for a cap of 400 and chose 2,500 on these numbers.
+
+Expected: about 12 hours for 500,000 streams (4.9 million core-seconds on 112 cores), 1.5 GB of tracks and
+3.6 GB of particles. *Results, timings and the prior predictive checks are added when the run is complete.*
+
 ## Figures (`plots/`; the pilot's are in `plots/pilot/`)
 
 `prior_marginals`, `energy`, `binned_values`, `gallery` (PDF, 3 pages; `gallery_p1..3.png`), `noise_examples`,
@@ -438,7 +465,7 @@ StreaMAX's to the last digit).
 
 ## Not verified
 
-- No production set exists in the new configuration (mixed progenitor state, Gibbons ordering, more particles or
+- (written before `train_v1`) No production set exists in the new configuration (mixed progenitor state, Gibbons ordering, more particles or
   steps): only the six test sets of 1,920 to 3,840 streams. The neighbour comparison with the observed tracks
   was not repeated for it. Convergence was not tested beyond 1,999 steps, and the test timings were taken on a
   machine shared with another job.
