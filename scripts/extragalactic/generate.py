@@ -91,6 +91,7 @@ class Config:
     # progenitor and for every particle, one leading and one trailing particle per release time; n_steps is
     # then the number of points sampled along each particle's path for the unwrapped angle and the ordering
     integrator: str = "leapfrog"
+    solver: str = "dopri8"  # galax: diffrax solver, dopri8 (galax's default) | dopri5 | tsit5
     max_steps: int = 1999  # galax: most steps one adaptive solve may take (a particle needing more is non-finite)
     rtol: float = 1e-7  # galax: relative and absolute tolerance of the step-size controller (galax's default)
     halo_flattening: str = "density"  # density (NFWFlatDensity) | potential (legacy NFW)
@@ -155,12 +156,15 @@ class Config:
             d["alt_ordering"] = True
         if self.integrator != "leapfrog":
             d.update(integrator=self.integrator, max_steps=self.max_steps, rtol=self.rtol)
+            if self.solver != "dopri8":  # only when used, so that the hash of the dopri8 sets does not change
+                d["solver"] = self.solver
         blob = json.dumps(d, sort_keys=True)
         return hashlib.sha1(blob.encode()).hexdigest()[:12]
 
     def check(self) -> None:
         ne = self.n_epochs
         assert self.integrator in ("leapfrog", "galax")
+        assert self.solver in ("dopri8", "dopri5", "tsit5")
         if self.integrator == "galax":
             if self.n_particles % 2:
                 raise SystemExit("n_particles must be even: one leading and one trailing particle per release time")
@@ -678,8 +682,9 @@ def make_simulator_galax(cfg: Config):
     along each path, with the formulas of the leapfrog version. Times run from 0 (-t_int) to t_int (today)."""
     cfg.check()
     N, n_rel, K = cfg.n_particles, cfg.n_particles // 2, cfg.n_steps
-    solver = gd.OrbitSolver(solver=dfx.Dopri8(scan_kind="bounded"),
-                            stepsize_controller=dfx.PIDController(rtol=cfg.rtol, atol=cfg.rtol), max_steps=cfg.max_steps)
+    method = dict(dopri8=dfx.Dopri8, dopri5=dfx.Dopri5, tsit5=dfx.Tsit5)[cfg.solver](scan_kind="bounded")
+    solver = gd.OrbitSolver(solver=method, stepsize_controller=dfx.PIDController(rtol=cfg.rtol, atol=cfg.rtol),
+                            max_steps=cfg.max_steps)
     df = gd.FardalStreamDF()
     rep = lambda a: jnp.repeat(a, 2, axis=0)  # per release time -> per particle (trailing, leading)
     frac = jnp.arange(1, K + 1) / K
