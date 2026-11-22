@@ -88,7 +88,10 @@ class Config:
     n_particles: int = 10_000
     n_steps: int = 99  # leapfrog steps per particle; n_steps + 1 release epochs (StreaMAX-fit default)
     halo_flattening: str = "density"  # density (NFWFlatDensity) | potential (legacy NFW)
-    progenitor_mass_loss: str = "none"  # none (C26) | linear (2026b, streams with no visible progenitor)
+    # none (C26: constant mass, a progenitor that is still there) | linear (2026b: mass ramped to 1 Msun, no
+    # visible progenitor) | mixed (each stream draws one of the two with probability p_dissolved for the ramp)
+    progenitor_mass_loss: str = "none"
+    p_dissolved: float = 0.5
     # --- prior (C26 table 1)
     log10_M_halo: tuple = (11.0, 14.0)
     R_s: tuple = (10.0, 25.0)  # kpc
@@ -100,6 +103,7 @@ class Config:
     t_int: tuple = (1.0, 4.0)  # Gyr
     # --- track
     track_ordering: str = "c26"  # c26 (per-particle unwrapping) | gibbons14 (StreaMAX get_stream_ordered)
+    alt_ordering: bool = False  # also store the track in the other ordering (track_alt/)
     bin_deg: float = 10.0
     phi_max_deg: float = 1440.0
     # --- diagnostics / selection (C26 sec. 2.3)
@@ -137,7 +141,13 @@ class Config:
     def physics_hash(self) -> str:
         keys = ("seed n_particles n_steps halo_flattening progenitor_mass_loss log10_M_halo R_s q log10_m_prog "
                 "r_s sigma_pos sigma_vel t_int track_ordering bin_deg phi_max_deg n_fine").split()
-        blob = json.dumps({k: getattr(self, k) for k in keys}, sort_keys=True)
+        d = {k: getattr(self, k) for k in keys}
+        # later options enter the hash only when used, so that the hash of earlier datasets does not change
+        if self.progenitor_mass_loss == "mixed":
+            d["p_dissolved"] = self.p_dissolved
+        if self.alt_ordering:
+            d["alt_ordering"] = True
+        blob = json.dumps(d, sort_keys=True)
         return hashlib.sha1(blob.encode()).hexdigest()[:12]
 
     def check(self) -> None:
@@ -148,7 +158,8 @@ class Config:
                 f"releases n_particles / (n_steps + 1) particles per epoch, half from each Lagrange point."
             )
         assert self.halo_flattening in ("density", "potential")
-        assert self.progenitor_mass_loss in ("none", "linear")
+        assert self.progenitor_mass_loss in ("none", "linear", "mixed")
+        assert 0.0 <= self.p_dissolved <= 1.0
         assert self.track_ordering in ("c26", "gibbons14")
 
 
@@ -390,6 +401,17 @@ def draw_prior(cfg: Config, idx) -> np.ndarray:
     return np.asarray(jax.vmap(lambda a: sample_prior(a, cfg))(kp))
 
 
+def draw_dissolved(cfg: Config, idx) -> np.ndarray:
+    """Progenitor state of streams `idx`: True = mass ramped to 1 Msun over t_int (2026b, no visible progenitor),
+    False = constant mass (C26, the progenitor is still there). `mixed` draws it per stream from its own key."""
+    idx = np.asarray(idx)
+    if cfg.progenitor_mass_loss != "mixed":
+        return np.full(idx.shape, cfg.progenitor_mass_loss == "linear")
+    master = jr.key(cfg.seed)
+    kk = jax.vmap(lambda i: jr.fold_in(jr.fold_in(master, i), 2))(jnp.asarray(idx, dtype=jnp.uint32))
+    return np.asarray(jax.vmap(lambda a: jr.bernoulli(a, cfg.p_dissolved))(kk))
+
+
 def halo_axis(theta: np.ndarray) -> np.ndarray:
     """n = (sin i cos psi, sin i sin psi, cos i): the physical symmetry axis of the halo."""
     ci, psi = theta[..., 3], theta[..., 4]
@@ -477,7 +499,7 @@ def make_simulator(cfg: Config):
     rep = lambda a: jnp.repeat(a, n_per, axis=0)
     df = gd.FardalStreamDF()
 
-    def sim(logM, Rs, q, nvec, logm, rs, wf, t_int, key):
+    def sim(logM, Rs, q, nvec, logm, rs, wf, t_int, ramp, key):
         host = OrientedNFWPotential(m=10.0**logM, r_s=Rs, q=q, axis=nvec, units=USYS, flatten=cfg.halo_flattening)
         prog = gp.PlummerPotential(m_tot=1.0, r_s=rs, units=USYS)  # linear in its mass: scaled by m(t) below
         acc_h = lambda x: -host._gradient(x, 0.0)
@@ -491,7 +513,7 @@ def make_simulator(cfg: Config):
         x_sat = jnp.concatenate([xb[-1:], xs])
         v_sat = jnp.concatenate([vb[-1:], vs])
         t_sat = dt * jnp.arange(ne)
-        logm_f = logm if cfg.progenitor_mass_loss == "none" else 0.0 * logm
+        logm_f = jnp.where(ramp > 0.5, 0.0, logm)  # final log10 mass: 0 (ramp to 1 Msun) or unchanged
         logm_sat = logm + (logm_f - logm) * jnp.arange(ne) / n
 
         # --- release: galax Fardal+15 DF. StreaMAX's tidal radius is NaN where Omega^2 - d2Phi/dr2 <= 0.
@@ -539,10 +561,22 @@ def make_simulator(cfg: Config):
         thp_u = jnp.concatenate([thp[:1], thp[0] + jnp.cumsum(dthp)])
         phi = rep(thp_u) + _wrap(th0 - rep(thp)) + dphi - thp_u[-1]
         ok = jnp.all(jnp.isfinite(xN), -1) & jnp.isfinite(phi) & rep(tidal_ok)
-        if cfg.track_ordering == "gibbons14":
-            phi = gibbons14_angle(xN[:, 0], xN[:, 1], g, ok)
+        rN = jnp.hypot(xN[:, 0], xN[:, 1])
+        phi_c26 = phi
+        if cfg.track_ordering == "gibbons14" or cfg.alt_ordering:
+            # StreaMAX zeroes this angle on the particle with the smallest |g|; here it is moved onto the
+            # progenitor's position today, so that both orderings share their zero and their bins
+            pg = gibbons14_angle(xN[:, 0], xN[:, 1], g, ok)
+            js = jnp.argmin(jnp.where(ok, jnp.abs(g), jnp.inf))
+            phi_g14 = pg + _wrap(jnp.arctan2(xN[js, 1], xN[js, 0]) - jnp.arctan2(xf[1], xf[0]))
+        phi, phi_other = (phi_g14, phi_c26) if cfg.track_ordering == "gibbons14" else (phi_c26, None)
+        if cfg.alt_ordering and cfg.track_ordering != "gibbons14":
+            phi_other = phi_g14
         phi_deg = jnp.rad2deg(phi)
-        out = bin_track(phi_deg, jnp.hypot(xN[:, 0], xN[:, 1]), ok, cfg)
+        out = bin_track(phi_deg, rN, ok, cfg)
+        if cfg.alt_ordering:
+            alt = bin_track(jnp.rad2deg(phi_other), rN, ok & jnp.isfinite(phi_other), cfg)
+            out.update({f"alt_{k}": alt[k] for k in TRACK_KEYS})
 
         # --- diagnostics from a finely sampled backward orbit
         xfi, vfi = kdk(acc_h, xf, vf, -t_int / cfg.n_fine, cfg.n_fine)
@@ -574,7 +608,7 @@ def make_simulator(cfg: Config):
     fn = jax.jit(jax.vmap(sim))
 
     def run(inp: dict, keys):
-        return fn(*(jnp.asarray(inp[k]) for k in ("logM", "Rs", "q", "nvec", "logm", "rs", "wf", "t_int")), keys)
+        return fn(*(jnp.asarray(inp[k]) for k in ("logM", "Rs", "q", "nvec", "logm", "rs", "wf", "t_int", "ramp")), keys)
 
     return run
 
@@ -589,6 +623,7 @@ DIAG_KEYS = ("E", "Phi0", "dE_rel", "dE_rel_fine", "dx_rel", "r_min", "r_max", "
 SUMMARY_KEYS = ("n_valid", "ang_len_deg", "ang_span_deg", "arc_len_kpc", "r_track_mean", "r_track_spread",
                 "r_track_min", "r_track_max")
 FLAG_KEYS = ("unbound", "completed_orbit", "contiguous", "sel_ang", "sel_arc", "sel_rad", "sel_all")
+ALT_KEYS = tuple(f"alt_{k}" for k in TRACK_KEYS)
 
 
 def track_summaries(count: np.ndarray, r_mean: np.ndarray, cfg: Config) -> dict:
@@ -626,7 +661,7 @@ def track_summaries(count: np.ndarray, r_mean: np.ndarray, cfg: Config) -> dict:
 
 def finalize(raw: dict, cfg: Config) -> dict:
     """Simulator output (numpy) -> everything stored per stream except the parameters."""
-    out = {k: raw[k] for k in TRACK_KEYS + DIAG_KEYS}
+    out = {k: raw[k] for k in TRACK_KEYS + DIAG_KEYS + ALT_KEYS + ("dissolved",) if k in raw}
     out.update(track_summaries(raw["count"], raw["r_mean"], cfg))
     unbound = ~(raw["E"] < 0)  # NaN energy counts as not bound
     failed = ~raw["prog_finite"] | (raw["n_bad"] >= cfg.n_particles) | ~np.isfinite(raw["E"])
@@ -688,10 +723,13 @@ class Simulator:
         pad = np.concatenate([idx, np.full(batch - len(idx), idx[-1])])
         th = draw_prior(cfg, pad) if theta is None else theta
         inp = theta_to_inputs(th) if inputs is None else inputs
+        dissolved = draw_dissolved(cfg, pad)
+        inp = dict(inp, ramp=dissolved.astype(np.float64))
         _, ks = stream_keys(cfg, pad)
         res = self.fn(inp, ks)
         skip = () if keep_particles else PARTICLE_KEYS + ("part_g", "sat_xy")
         raw = {k: np.asarray(v)[: len(idx)] for k, v in res.items() if k not in skip}
+        raw["dissolved"] = dissolved[: len(idx)]
         return th[: len(idx)], raw
 
     def simulate(self, idx: np.ndarray, keep_particles: bool = False):
@@ -735,6 +773,13 @@ def write_shard(path: Path, cfg: Config, idx: np.ndarray, theta: np.ndarray, fin
         f.create_dataset("track/count", data=fin["count"].astype(np.int16), **comp)
         for k in TRACK_KEYS[1:]:
             f.create_dataset(f"track/{k}", data=fin[k].astype(np.float32), **comp)
+        f["track"].attrs["ordering"] = cfg.track_ordering
+        if cfg.alt_ordering:  # the same track in the other ordering
+            f.create_group("track_alt").attrs["ordering"] = "c26" if cfg.track_ordering == "gibbons14" else "gibbons14"
+            f.create_dataset("track_alt/count", data=fin["alt_count"].astype(np.int16), **comp)
+            for k in TRACK_KEYS[1:]:
+                f.create_dataset(f"track_alt/{k}", data=fin[f"alt_{k}"].astype(np.float32), **comp)
+        f.create_dataset("prog/dissolved", data=fin["dissolved"].astype(bool))
         for k in DIAG_KEYS:
             a = fin[k]
             f.create_dataset(f"diag/{k}", data=a if a.dtype.kind == "i" else a.astype(np.float32))
@@ -938,6 +983,10 @@ def load_shards(ddir: Path, with_tracks: bool = False) -> dict:
             for g in groups:
                 for k in f[g]:
                     cols.setdefault(k, []).append(f[g][k][:])
+            # the progenitor state; shards written before it existed were made with one mass-loss mode
+            cols.setdefault("dissolved", []).append(
+                f["prog/dissolved"][:] if "prog" in f else
+                np.full(len(f["index"]), json.loads(f.attrs["config"])["progenitor_mass_loss"] == "linear"))
     if not cols:
         raise SystemExit(f"no shards in {ddir}")
     d = {k: np.concatenate(v) for k, v in cols.items()}
@@ -1191,7 +1240,7 @@ def test_streamax(cfg: Config, sim: "Simulator", th: np.ndarray, rep: dict, tdir
     idx = np.arange(B)
     _, raw = sim._run(idx, B, keep_particles=True, theta=pad)
     np.savez(tdir / "streamax_in.npz", theta=th, c26_vec=c26_vector(th, cfg), n_steps=cfg.n_steps,
-             n_particles=cfg.n_particles, flatten=cfg.halo_flattening, mass_loss=cfg.progenitor_mass_loss)
+             n_particles=cfg.n_particles, flatten=cfg.halo_flattening, dissolved=raw["dissolved"][:k])
     env = dict(os.environ, JAX_PLATFORMS="cpu", CUDA_VISIBLE_DEVICES="")
     r = subprocess.run([sys.executable, __file__, "streamax", str(tdir / "streamax_in.npz"),
                         str(tdir / "streamax_out.npz")], env=env, capture_output=True, text=True)
@@ -1259,13 +1308,13 @@ def cmd_streamax(fin: str, fout: str) -> None:
     n_steps, n_particles = int(d["n_steps"]), int(d["n_particles"])
     host = "NFWFlatDensity" if str(d["flatten"]) == "density" else "NFW"
     res = dict(x=[], y=[], theta=[], xv_sat=[])
-    for th, vec in zip(d["theta"], d["c26_vec"]):
+    for th, vec, dissolved in zip(d["theta"], d["c26_vec"], d["dissolved"]):
         logM, Rs, q, _, _, logm, rs, x0, z0, vx, vy, vz, t = (float(a) for a in th)
         ph = dict(logM=logM, Rs=Rs, a=1.0, b=1.0, c=q, dirx=float(vec[0]), diry=float(vec[1]), dirz=float(vec[2]),
                   x_origin=0.0, y_origin=0.0, z_origin=0.0)
         ps = dict(logM=logm, Rs=rs, x_origin=x0, y_origin=0.0, z_origin=z0)
         xv_f = _jnp.array([x0, 0.0, z0, vx * StreaMAX.KMS_TO_KPCGYR, vy * StreaMAX.KMS_TO_KPCGYR, vz * StreaMAX.KMS_TO_KPCGYR])
-        m_f = logm if str(d["mass_loss"]) == "none" else 0.0
+        m_f = 0.0 if bool(dissolved) else logm
         _, xv_sat, xv, xhi = StreaMAX.generate_stream(xv_f, host, ph, "Plummer", ps, t, 1.0, n_steps, n_particles,
                                                       1, m_f_sat=m_f)
         xo, yo, tho, _, _ = StreaMAX.get_stream_ordered(xv[:, 0], xv[:, 1], xhi)
