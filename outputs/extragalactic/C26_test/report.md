@@ -330,13 +330,51 @@ fewer steps (a median of 14 per particle) but each Dopri8 step is 13 force evalu
 steps are rejected, and the solves run one particle at a time. Not tested: a looser tolerance, a cheaper
 solver (Tsit5, Dopri5), a larger step cap, and galax's own `MockStreamGenerator.run` end to end.
 
+### The galax set used for the galleries and the prior inspection (`galax_pilot`)
+
+3,840 prior draws, 30,000 particles, galax integrator (1,999-step cap), mixed progenitor state, Gibbons ordering
+in `track/` and C26 in `track_alt/`, particles saved for the first 384; 64 single-core workers, 1,864 s. Analysed
+with `--n-valid-min 300` (1 % of the particles, the equivalent of 100 of 10,000). Figures in
+`plots/galax_pilot/` (the standard set) and `plots/galax_pilot/prior_inspection/`.
+
+Unbound 35.5 %; failed 0.23 % (9 streams whose progenitor orbit hit the step cap); angular length > 90 deg
+19.5 %; arc length > 100 kpc 30.6 %; radii in [10, 500] kpc 93.1 %; all three cuts 11.2 % (431 streams, 182 of
+them bound, 325 with contiguous bins). With 3,840 simulations the neighbour search against the observed tracks
+is thin (at most a few hundred simulations cover a short observed track, a handful a long one).
+
+**Why 11 % pass the cuts here against 23.5 % in the production set.** On the same 1,920 draws, with a valid bin
+defined as 1 % of the particles:
+
+| | passes the three cuts |
+|---|---|
+| production: constant progenitor mass, 99 leapfrog steps, C26 ordering | 23.8 % |
+| mixed progenitor state (half dissolved), 99 steps, C26 ordering | 17.3 % |
+| the same at 1,999 steps | 15.6 % |
+| the same with the galax integrator | 14.9 % |
+| galax integrator, Gibbons ordering | 11.9 % |
+
+So three things each remove a few points: dissolved progenitors make shorter streams, resolving the orbits
+removes the scattered particles that made unresolved streams look long (the mean number of valid bins falls
+from 8.2 to 7.1), and the Gibbons ordering populates fewer bins than the C26 one.
+
+**The Gibbons ordering runs away much more often than the C26 one.** Share of streams with more than 1 % of
+their particles beyond the +-1,440 deg grid: Gibbons 22.6 % (leapfrog 99), 14.0 % (leapfrog 1,999), 12.3 %
+(galax); C26 2.3 %, 2.2 %, 5.0 %. For the galax set, by pericentre passages (0, 1, 2, ..., 6+): Gibbons 4, 2, 7,
+11, 15, 31, 43 %; C26 0, 0, 0, 1, 1, 3, 27 %. Streams with no pericentre cannot wrap four times, so the Gibbons
+cases there are failures of the unwrapping, not long streams. The code follows StreaMAX (checked against its
+source: particles sorted by the summed radial offset from the progenitor, polar angle unwrapped along that
+order), whose sort key does not order particles released at different times along the stream. The fits use
+only the bins of the observed track, where this matters less; a prior-wide training set is more exposed. Both
+orderings are stored, so the choice can be made later; the galleries above use the Gibbons one.
+
 ## Figures (`plots/`; the pilot's are in `plots/pilot/`)
 
 `prior_marginals`, `energy`, `binned_values`, `gallery` (PDF, 3 pages; `gallery_p1..3.png`), `noise_examples`,
 `streamax_comparison`, `energy_conservation`; in `plots/prior_inspection/`: `funnel`, `prior_bound_vs_all`,
 `corner_bound_vs_all`, `corner_bound_vs_all_focus`, `acceptance`, `acceptance_maps`, `integrator`, `observable`,
 `strrings`, `strrings_neighbours_p1..4`, `strrings_neighbour_parameters`, `gallery_bound`, `gallery_unbound`,
-`bound_vs_unbound_tracks`; in `plots/convergence/`: `convergence`. Each as PDF and PNG; all were looked at.
+`bound_vs_unbound_tracks`; in `plots/convergence/`: `convergence`, `galax_integrator`; the same standard and
+prior-inspection figures for the galax set in `plots/galax_pilot/`. Each as PDF and PNG; all were looked at.
 
 ## What was read in StreaMAX, and where this differs from the prompt
 
