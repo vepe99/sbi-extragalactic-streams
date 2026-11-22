@@ -779,7 +779,12 @@ def write_shard(path: Path, cfg: Config, idx: np.ndarray, theta: np.ndarray, fin
             f.create_dataset("track_alt/count", data=fin["alt_count"].astype(np.int16), **comp)
             for k in TRACK_KEYS[1:]:
                 f.create_dataset(f"track_alt/{k}", data=fin[f"alt_{k}"].astype(np.float32), **comp)
+        # the progenitor (or, if dissolved, its remnant) today, in the frame of the stored track: on the +x axis
+        # at phi = 0, so y0 = 0 by construction. In a frame rotated by an angle a (for instance one centred on
+        # an observed window) it sits at x0 (cos a, sin a), which is the y0 a network can be conditioned on.
         f.create_dataset("prog/dissolved", data=fin["dissolved"].astype(bool))
+        f.create_dataset("prog/xy", data=np.stack([theta[:, 7], np.zeros(len(theta))], 1).astype(np.float32))
+        f.create_dataset("prog/phi_deg", data=np.zeros(len(theta), np.float32))
         for k in DIAG_KEYS:
             a = fin[k]
             f.create_dataset(f"diag/{k}", data=a if a.dtype.kind == "i" else a.astype(np.float32))
@@ -987,6 +992,7 @@ def load_shards(ddir: Path, with_tracks: bool = False) -> dict:
             cols.setdefault("dissolved", []).append(
                 f["prog/dissolved"][:] if "prog" in f else
                 np.full(len(f["index"]), json.loads(f.attrs["config"])["progenitor_mass_loss"] == "linear"))
+            cols.setdefault("prog_xy", []).append(np.stack([f["theta"][:, 7], np.zeros(len(f["index"]), np.float32)], 1))
     if not cols:
         raise SystemExit(f"no shards in {ddir}")
     d = {k: np.concatenate(v) for k, v in cols.items()}

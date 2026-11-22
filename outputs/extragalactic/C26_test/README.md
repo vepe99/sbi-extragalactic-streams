@@ -48,6 +48,9 @@ Units: kpc, km/s, Gyr, Msun, degrees for the track angle, radians for `psi`.
 | `axis` | (n, 3) f4 | halo symmetry axis n = (sin i cos psi, sin i sin psi, cos i) |
 | `c26_vec` | (n, 3) f4 | C26 vector (xhat, yhat, zhat) **in StreaMAX's convention**: r(q) x (-n_x, -n_y, n_z); pass it as `dirx, diry, dirz` to StreaMAX to get this halo |
 | `status` | (n,) i4 | bit flags, see below |
+| `prog/dissolved` | (n,) bool | progenitor state: False = constant mass, the progenitor is still there (C26); True = mass ramped to 1 Msun over t_int, no visible progenitor (2026b). Set by `--progenitor-mass-loss none / linear / mixed`; `mixed` draws it per stream with probability `--p-dissolved` |
+| `prog/xy`, `prog/phi_deg` | (n, 2) f4, (n,) f4 | sky position of the progenitor (or of its remnant) today, in the frame of the stored track: `(x0, 0)` kpc at `phi = 0`. `y0 = 0` by construction; in a frame rotated by an angle `a`, for instance one centred on an observed window, it is `x0 (cos a, sin a)` |
+| `track_alt/*` | as `track/*` | only with `--alt-ordering`: the same track in the other ordering (attribute `ordering` on both groups). Both are zeroed on the progenitor and share their bins |
 | `track/count` | (n, 288) i2 | particles per bin; bin j covers phi in [-1440 + 10 j, -1430 + 10 j) deg |
 | `track/r_mean`, `track/r_std` | (n, 288) f4 | mean and standard deviation (ddof 0) of the projected radius; NaN in empty bins |
 | `track/r_med`, `track/r_hw` | (n, 288) f4 | median and (p84 - p16)/2: the two statistics StreaMAX `get_track_2D` returns |
@@ -69,6 +72,10 @@ Units: kpc, km/s, Gyr, Msun, degrees for the track angle, radians for `psi`.
 
 File attributes: `config` (JSON of every setting), `physics_hash`, `meta` (device, wall time), `theta_names`,
 `status_bits`.
+
+Settings other than the C26 defaults (`--n-steps`, `--n-particles`, `--progenitor-mass-loss mixed`,
+`--track-ordering gibbons14`, `--alt-ordering`) change the physics hash, so such a set needs its own `--subdir`.
+The Gibbons+14 ordering is zeroed on the progenitor here; StreaMAX zeroes it on the particle nearest to it.
 
 `status` bits: 1 unbound, 2 some particles non-finite, 4 tidal radius undefined at some release epoch
 (Omega^2 - d2Phi/dr2 <= 0; StreaMAX returns NaN there), 8 particles outside the phi grid, 16 failed
