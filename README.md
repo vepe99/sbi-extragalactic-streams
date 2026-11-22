@@ -33,6 +33,14 @@ uv run --script scripts/extragalactic/plot.py                                   
 `run` resumes: rerun the same command after an interruption and finished shards are skipped. Stream `k` depends
 only on `(seed, k)`, so batch size, shard size and the number of workers do not change the results.
 
+On a many-core machine one JAX process does not use the cores well. `run --cpu` therefore takes
+`--cpu-workers N` (N worker processes, each with its own block of shards) and `--cpu-cores 0-47,64-111` (the
+cores shared out among them, in `taskset` syntax; each worker is pinned to its group). Without these two flags
+`run --cpu` starts a single unpinned worker, as before.
+
+The resolved environments are pinned in `scripts/extragalactic/generate.py.lock` and `plot.py.lock`
+(`uv lock --script <file>`); `uv run --script` uses them.
+
 ## CPU and GPU
 
 The dataset in this repository was generated on CPU: pass `--cpu` to every command on a machine without a GPU.

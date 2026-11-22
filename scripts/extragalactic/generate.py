@@ -118,6 +118,8 @@ class Config:
     subdir: str = ""  # data/<subdir>; the pilot writes to data/pilot
     gpus: str = ""  # comma-separated GPU indices/UUIDs to use instead of the free ones
     cpu: bool = False
+    cpu_workers: int = 1  # with --cpu, `run` starts this many worker processes (disjoint blocks of shards)
+    cpu_cores: str = ""  # with --cpu, cores shared out among the workers, e.g. "0-47,64-111"; "" = no pinning
     overwrite: bool = False
     # --- tests
     n_energy: int = 200
@@ -832,36 +834,53 @@ def cli_overrides(cfg: Config) -> list[str]:
     out = []
     for f in dataclasses.fields(Config):
         v = getattr(cfg, f.name)
-        if v == f.default or f.name in ("gpus", "cpu"):
+        if v == f.default or f.name in ("gpus", "cpu", "cpu_workers", "cpu_cores"):
             continue
         flag = "--" + f.name.replace("_", "-")
         out += [flag] if isinstance(v, bool) else [flag, ",".join(map(str, v)) if isinstance(v, tuple) else str(v)]
     return out
 
 
+def cpu_pins(cores: str, n: int) -> list[list[int] | None]:
+    """Split a core list in taskset syntax ("0-47,64-111") into `n` contiguous groups, one per CPU worker."""
+    if not cores:
+        return [None] * n
+    ids = [c for part in cores.split(",") if part
+           for c in (lambda a, b=None: range(int(a), int(b or a) + 1))(*part.split("-"))]
+    if len(ids) < n:
+        raise SystemExit(f"--cpu-cores lists {len(ids)} cores for {n} workers")
+    return [[int(c) for c in g] for g in np.array_split(np.array(ids), n)]
+
+
 def cmd_run(cfg: Config) -> None:
-    """Step 6: one worker per free GPU, each with a contiguous, disjoint block of shards."""
+    """Step 6: one worker per free GPU (or `cpu_workers` CPU workers), each with a contiguous, disjoint block
+    of shards."""
     ddir = data_dir(cfg)
     (ddir / "logs").mkdir(parents=True, exist_ok=True)
     n_shards = -(-cfg.n_streams // cfg.shard_size)
-    devices = [""] if cfg.cpu else ([g for g in cfg.gpus.split(",") if g] or free_gpus())
+    devices = [""] * max(1, cfg.cpu_workers) if cfg.cpu else ([g for g in cfg.gpus.split(",") if g] or free_gpus())
     if not devices:
         raise SystemExit("no free GPU right now (pass --gpus to force a choice, or --cpu)")
     blocks = [b for b in np.array_split(np.arange(n_shards), len(devices)) if len(b)]
-    print(f"{cfg.n_streams} streams in {n_shards} shards on {len(blocks)} worker(s): {devices[:len(blocks)]}", flush=True)
+    pins = cpu_pins(cfg.cpu_cores, len(blocks)) if cfg.cpu else [None] * len(blocks)
+    print(f"{cfg.n_streams} streams in {n_shards} shards on {len(blocks)} worker(s): "
+          f"{pins if cfg.cpu else devices[:len(blocks)]}", flush=True)
     t0 = time.time()
     procs = []
-    for dev, blk in zip(devices, blocks):
+    for dev, blk, pin in zip(devices, blocks, pins):
         env = dict(os.environ)
         env.pop("JAX_PLATFORMS", None)
         env["CUDA_VISIBLE_DEVICES"] = dev
         cmd = [sys.executable, __file__, "worker", "--shards", f"{blk[0]}:{blk[-1] + 1}", *cli_overrides(cfg)]
         cmd += ["--cpu"] if cfg.cpu else []
         log = open(ddir / "logs" / f"worker_{blk[0]:05d}.log", "a")
-        procs.append((subprocess.Popen(cmd, env=env, stdout=log, stderr=subprocess.STDOUT), dev, blk))
+        # a pinned CPU worker sees only its own cores, so JAX sizes its thread pool to them
+        pre = (lambda c=pin: os.sched_setaffinity(0, c)) if pin else None
+        procs.append((subprocess.Popen(cmd, env=env, stdout=log, stderr=subprocess.STDOUT, preexec_fn=pre), dev, blk))
     fail = [(dev, p.returncode) for p, dev, _ in procs if p.wait() != 0]
     wall = time.time() - t0
-    man = write_manifest(cfg, dict(run=dict(wall_s=wall, devices=devices[: len(blocks)], failed=fail)))
+    man = write_manifest(cfg, dict(run=dict(wall_s=wall, devices=devices[: len(blocks)], failed=fail,
+                                            cpu_pins=pins if cfg.cpu else None)))
     print(f"done in {wall:.0f} s: {man['n_streams']} / {cfg.n_streams} streams on disk"
           + (f"; FAILED workers {fail} (see {ddir / 'logs'}; rerun to resume)" if fail else ""), flush=True)
 
