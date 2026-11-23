@@ -3,7 +3,7 @@
 **Status (2026-11-22): complete.** The 100,000-stream production set was generated on CPU on 2026-11-22
 (`data/manifest.json` has `"complete": true`, no failed worker, no failed stream). The GPU path has still never
 been run. Everything in `data/` and `plots/` was produced by commit `461e2aa`; the prior inspection
-(`plots/prior_inspection/`) by the commit that added `analysis/inspect_prior.py`.
+(`plots/prior_inspection/`) by the commit that added `scripts/extragalactic/inspect_prior.py`.
 
 ## Machine and environment
 
@@ -38,7 +38,7 @@ All through `uv run --script scripts/extragalactic/generate.py` (`G`) or `plot.p
 | 7 | `P` | 32 | 27 s | all figures |
 | 8 | `P --only tests` | 32 | 2.5 s | the two test figures |
 | 9 | `G pilot --cpu --pilot-n 200 --n-save-particles 0`, 5 runs with batch 8 / 16 and 1 / 16 cores | 1 or 16 | under 2 min | reproducibility check below; folders deleted |
-| 10 | `uv run python analysis/inspect_prior.py` | 16 | 9 s | `plots/prior_inspection/`, `data/prior_inspection.json` |
+| 10 | `uv run python scripts/extragalactic/inspect_prior.py` | 16 | 9 s | `plots/prior_inspection/`, `data/prior_inspection.json` |
 
 No interruption, no resume, no failed worker, nothing in the simulator needed a fix. The resume path of `run` was
 therefore not exercised.
@@ -170,7 +170,7 @@ batch size), not a seeding problem. A dataset is exactly reproducible only at th
 
 ## Prior inspection ahead of amortized inference
 
-`analysis/inspect_prior.py`, numbers in `data/prior_inspection.json`, figures in `plots/prior_inspection/`.
+`scripts/extragalactic/inspect_prior.py`, numbers in `data/prior_inspection.json`, figures in `plots/prior_inspection/`.
 
 - **Usable fraction.** 23.5 % of the draws pass the three C26 cuts (23,511). Requiring a resolved progenitor
   orbit (energy error < 1 %) leaves 16.8 % (16,763); of those 58 % are unbound fly-bys (7,043 bound) and 66 %
@@ -225,7 +225,7 @@ Generator options added for this (defaults unchanged, 19 / 19 checks pass in bot
 `prog/dissolved`), `--alt-ordering` (both orderings stored), the progenitor's sky position in `prog/xy`, and the
 Gibbons ordering zeroed on the progenitor. Six test sets with the same seed, mixed progenitor state, Gibbons
 ordering in `track/` and the C26 one in `track_alt/`, 48 single-core workers on a machine shared with another
-56-core job; `analysis/convergence.py`, `plots/convergence/convergence`, `data/convergence.json`.
+56-core job; `scripts/extragalactic/convergence.py`, `plots/convergence/convergence`, `data/convergence.json`.
 
 | set | steps | particles | streams | wall time | streams per core-second | 1,000,000 streams on 100 cores |
 |---|---|---|---|---|---|---|
@@ -553,7 +553,7 @@ Second round, same day, also asked by the user:
 Left in `data/`: `c26_100k/` (113 MB), `train_v1/`, `strrings/`, `tests/` (the step-4 test report and the
 StreaMAX comparison) and `convergence.json`.
 
-Consequences: `analysis/convergence.py` and the particle galleries cannot be redrawn for the deleted sets, and
+Consequences: `scripts/extragalactic/convergence.py` and the particle galleries cannot be redrawn for the deleted sets, and
 the existing figures of the 100,000 set stay in `plots/` while new ones made with `--subdir c26_100k` go to
 `plots/c26_100k/`. Every stream depends only on the seed and its index, so each set can be regenerated with
 the settings in the tables above (the 100,000 set took 435 s on 100 cores).

@@ -1,6 +1,6 @@
 """Prior predictive checks of a simulated set against the observed STRRINGS tracks.
 
-    uv run python analysis/prior_predictive.py --subdir train_v1
+    uv run python scripts/extragalactic/prior_predictive.py --subdir train_v1
 
 Works on a finished set or on the shards written so far (they are independent prior draws). Reads the shards
 directly, so `generate.py analyze` is not needed. Writes plots/<subdir>/prior_predictive/ and
@@ -26,9 +26,8 @@ from pathlib import Path
 import h5py
 import numpy as np
 
-REPO = Path(__file__).resolve().parents[1]
+REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "scripts" / "extragalactic"))
-sys.path.insert(0, str(REPO / "analysis"))
 import inspect_prior as I  # noqa: E402  observed tracks
 import plot as P  # noqa: E402  palette and style
 

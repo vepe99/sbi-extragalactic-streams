@@ -1,6 +1,6 @@
 """How many particles and how many leapfrog steps does a usable training set need?
 
-    uv run python analysis/convergence.py
+    uv run python scripts/extragalactic/convergence.py
 
 Reads the test sets data/conv_p10, conv_p30, conv_p50 (99 steps; 10,000 / 30,000 / 50,000 particles),
 data/conv_s399, conv_s1999 (about 30,000 particles; 399 / 1,999 steps) and conv_s399b (399 steps, 20,000
@@ -24,9 +24,8 @@ from pathlib import Path
 import h5py
 import numpy as np
 
-REPO = Path(__file__).resolve().parents[1]
+REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "scripts" / "extragalactic"))
-sys.path.insert(0, str(REPO / "analysis"))
 import inspect_prior as I  # noqa: E402  observed tracks, palette
 import plot as P  # noqa: E402
 

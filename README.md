@@ -13,11 +13,11 @@ dataset is the starting point for testing whether an amortized posterior estimat
 - `scripts/extragalactic/plot.py`: figures
 - `scripts/extragalactic/train.py`: amortised posterior estimation with BayesFlow (mock observations, the
   likelihood, training, posterior samples for the observed tracks); see "Amortised inference" below
-- `analysis/inspect_prior.py`: prior inspection ahead of amortized inference (usable fraction, what the selection
+- `scripts/extragalactic/inspect_prior.py`: prior inspection ahead of amortized inference (usable fraction, what the selection
   cuts do to the prior, where the integrator fails, the prior predictive against the STRRINGS streams)
-- `analysis/prior_predictive.py`: prior predictive checks of a set (finished or partial) against the observed
+- `scripts/extragalactic/prior_predictive.py`: prior predictive checks of a set (finished or partial) against the observed
   STRRINGS tracks
-- `analysis/convergence.py`: how many particles and leapfrog steps a training set needs. It reads the `conv_*`
+- `scripts/extragalactic/convergence.py`: how many particles and leapfrog steps a training set needs. It reads the `conv_*`
   test sets, which were deleted on 2026-11-23; its figures and `data/convergence.json` are kept, and the report
   lists the settings to regenerate the sets
 - `outputs/extragalactic/C26_test/README.md`: data schema
@@ -33,9 +33,9 @@ Generated data (`outputs/**/data/`) and figures (`outputs/**/plots/`) are not tr
   and from inference; 32 of the 35 streams are used. This is the sample of 2026b (its section 2): PGC021008 is
   bright enough to have been modelled away with the host light, NGC1084 could not be fitted and may be a spiral
   arm, and NGC1121 is a three-loop stream left to a dedicated study. Encoded as `STRRINGS_EXCLUDED` in
-  `analysis/inspect_prior.py`.
+  `scripts/extragalactic/inspect_prior.py`.
 - **Observed tracks:** the 32 tracks released with [StreaMAX-fit](https://github.com/David-Chemaly/StreaMAX-fit)
-  at commit `2e6a708` (MIT licence). `analysis/inspect_prior.py` fetches them into
+  at commit `2e6a708` (MIT licence). `scripts/extragalactic/inspect_prior.py` fetches them into
   `outputs/extragalactic/C26_test/data/strrings/` on first use; they are not tracked here.
 
 ## The five commands
@@ -98,7 +98,7 @@ the analysis and training code that will follow: `uv sync`, then `uv run python 
 CUDA 12 wheels. The five commands above do not use it; they run from the script headers.
 
 ```bash
-uv run python analysis/inspect_prior.py --subdir c26_100k   # plots/c26_100k/prior_inspection/ + data/c26_100k/prior_inspection.json
+uv run python scripts/extragalactic/inspect_prior.py --subdir c26_100k   # plots/c26_100k/prior_inspection/ + data/c26_100k/prior_inspection.json
 ```
 
 ## Amortised inference

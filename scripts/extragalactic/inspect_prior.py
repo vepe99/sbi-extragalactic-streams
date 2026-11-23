@@ -1,7 +1,7 @@
 """Prior inspection before training an amortized posterior estimator on the C26 prior-predictive set.
 
-    uv run python analysis/inspect_prior.py                 # production set
-    uv run python analysis/inspect_prior.py --subdir pilot  # the 1,000-stream pilot
+    uv run python scripts/extragalactic/inspect_prior.py                 # production set
+    uv run python scripts/extragalactic/inspect_prior.py --subdir pilot  # the 1,000-stream pilot
 
 Reads data/analysis.h5 and the shard tracks (written by scripts/extragalactic/generate.py), writes figures to
 plots/prior_inspection/ and the numbers behind them to data/prior_inspection.json. Nothing is simulated here.
@@ -32,7 +32,7 @@ from pathlib import Path
 
 import numpy as np
 
-REPO = Path(__file__).resolve().parents[1]
+REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "scripts" / "extragalactic"))
 import plot as P  # noqa: E402  palette, matplotlib style and the data loader of the figure script
 

@@ -25,7 +25,8 @@ dependencies = [
     "h5py==3.16.0",
     "matplotlib==3.11.2",
     "astropy==8.0.3",
-    "autocvd==0.2.1",
+    "autocvd==0.2.1",  # picks a free GPU and sets CUDA_VISIBLE_DEVICES (see CLAUDE.md)
+    "gpustat==1.1.1",  # `uv run gpustat`: who is using which GPU
     "StreaMAX @ git+https://github.com/David-Chemaly/StreaMAX.git@9fd520ea2904b617c701e1ee5b8740a9a0fd148e",
     "bayesflow==2.1.0",  # amortised inference (scripts/extragalactic/train.py); keras 3 with the jax backend
 ]
