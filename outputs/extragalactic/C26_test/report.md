@@ -543,6 +543,29 @@ What changed besides the layout:
   which the progenitor sits, is a 15th parameter, uniform a priori. In a share `--p-known` of the examples it
   is marked as fixed with BayesFlow's `fixed_target_mask`: the network is given its value and infers the other
   14, which is the paper's setting. In the rest it is inferred. This replaces the `--prog-position` switch.
+- **Why a fixed target and not another mask** (BayesFlow masking guide, read 2026-11-23). The paper holds the
+  progenitor coordinate at a known value, which is a conditional on a parameter, p(theta_14 | prog = value,
+  track): `fixed_target_mask` with `fixed_target_value`. `observed_condition_mask` is for data that may be
+  missing and the coupling flow does not support it; `infer_target_mask` gives a marginal that the joint
+  posterior already gives by dropping a column. The mask only clamps the coordinate: the subnets of the
+  coupling flow and the MLP backbone are not told which coordinate is fixed (checked in BayesFlow's source),
+  so the conditions carry a "position given" flag. Both queries were run on a 4-epoch smoke model: calibration
+  error at most 0.05 in each, and with the position free its posterior contraction is 0.19.
+- **What the released STRRINGS files hold.** Per stream: `theta` (unwrapped angle), `r`, `r_err`, the sky
+  positions `x`, `y` of the track points, the host position angle, the redshift, and the fit settings of the
+  paper (`n_particles` 10,500 to 72,000, above our 30,000 for 14 of the 32; `var_ratio` 9, or 4 for four
+  streams; `r_scale`). There is no progenitor position and
+  no flag for a visible progenitor, so for these tracks the position can only be set to the centre, as the
+  released code does for all 32.
+- **Where progenitor positions can be found** (searched 2026-11-23). Not in 2026b, which names no stream with a
+  visible progenitor, and not in StreaMAX-fit (`2e6a708`, still the head of its main branch). The STRRINGS
+  catalogue paper (arXiv:2508.02154, section 5.3 and table 3) lists six streams with a candidate dwarf
+  progenitor and its sky coordinates (RA, Dec in degrees): ESO356-012 (42.186, -36.526), NGC0804 (30.996,
+  30.817), NGC5513_GROUP (213.306, 20.424; identification uncertain), PGC1092512 (337.795, -2.407), PGC430221
+  (304.791, -53.414), UGC09239 (216.287, 13.753). All six are among our 32. Turning these into a position
+  along the track needs the host centre and the orientation of the `x`, `y` frame of the track files, neither
+  of which is in the files; not done. Decision of the same day: the position is not passed to the network
+  for now (`p_known = 0`).
 - **`evaluation.py`.** Recovery, calibration (rank ECDF), z-score against contraction, all from BayesFlow's
   diagnostics on mock tracks of held-out streams; posterior predictive checks; posteriors of the 32 observed
   tracks. Numbers in `metrics.json`.

@@ -1,0 +1,60 @@
+# SBI run npe_v2: settings for training, evaluation and evaluation on the observed tracks.
+#
+#   uv run --extra gpu python scripts/extragalactic/sbi/train.py           --config outputs/extragalactic/C26_test/npe_v2.yaml
+#   uv run --extra gpu python scripts/extragalactic/sbi/evaluation.py      --config outputs/extragalactic/C26_test/npe_v2.yaml
+#   uv run --extra gpu python scripts/extragalactic/sbi/evaluation_real.py --config outputs/extragalactic/C26_test/npe_v2.yaml
+#
+# Paths are relative to the repository root. Every field of Config (scripts/extragalactic/sbi/config.py) can be
+# set here; the ones left out keep their defaults. Results go to outputs/extragalactic/C26_test/models/npe_v2/.
+
+name: npe_v2
+
+# --- data
+out: outputs/extragalactic/C26_test
+subdir: train_v1            # outputs/extragalactic/C26_test/data/train_v1/shard_*.h5 (500,000 streams)
+ordering: c26               # c26 | gibbons14 (the ordering of 2026b, stored as track_alt/)
+val_frac: 0.05              # last 5 % of the usable streams are held out
+n_val: 20000                # fixed mock tracks of the held-out streams, the validation set
+
+# --- mock observations (the augmentation)
+n_min: 10                   # model particles a bin needs (guard 1 of 2026b)
+var_ratio: 9.0              # model variance <= data variance / 9 (guard 2); 0 = off
+p_known: 0.0                # progenitor position never given to the network: inferred as a nuisance parameter
+
+# --- networks
+inference: flow             # flow | diffusion | flow_matching
+backbone: mlp               # for diffusion / flow_matching: mlp | transformer
+depth: 6                    # coupling layers
+width: 256
+flow_layers: 6              # hidden layers of the MLP in each coupling layer
+summary: transformer        # transformer | timeseries | mlp
+summary_dim: 32
+embed_dim: 128
+n_blocks: 3
+n_heads: 4
+dropout: 0.05
+
+# ---- output directory 
+name: npe_v2
+
+# --- training
+epochs: 100
+batch_size: 512
+lr: 0.0005
+seed: 2607
+cpu: false                  # false = take a free GPU with autocvd
+
+# --- evaluation.py (mock tracks of held-out streams)
+n_test: 1000                # mock tracks for recovery, calibration, contraction
+n_samples: 1000             # posterior draws per track
+ppc_tracks: 6               # mock tracks in the posterior predictive check
+ppc_draws: 64               # posterior draws per track that are simulated again (also for evaluation_real.py)
+
+# --- evaluation_real.py (observed STRRINGS tracks)
+real_tracks: ""             # "" = all 32, or e.g. NGC5907,NGC1162
+importance: true            # importance weights with the likelihood of 2026b (prior x likelihood / q)
+prog_given: false           # true needs p_known > 0 at training
+
+# --- simulations of posterior draws (generate.py on CPU, about 10 core-seconds per draw)
+sim_workers: 16
+sim_cores: ""               # e.g. 0-15 to pin them

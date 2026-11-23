@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from config import parse
 
-cfg, _ = parse()
+cfg = parse()
 
 import numpy as np  # noqa: E402
 from scipy import stats  # noqa: E402
@@ -57,7 +57,8 @@ par2 = prior.from_latent(mo["zeta"][:, [I_SIG, I_PROG]], cols=[I_SIG, I_PROG])
 check("sigma_sys and the progenitor position map back from their latent values",
       np.allclose(par2[:, 0], mo["sig_sys"], rtol=1e-3, atol=1e-3) and np.all(np.floor(par2[:, 1] * (S + 1)) == l))
 known = mo["fixed_target_mask"][:, I_PROG] == 0
-check("only the progenitor position is ever marked as given", np.all(mo["fixed_target_mask"][:, :I_PROG] == 1), given=f"{known.mean():.2f}")
+check("only the progenitor position is ever marked as given, and the flag in the conditions says when",
+      np.all(mo["fixed_target_mask"][:, :I_PROG] == 1) and np.all((mo["cond"][:, 1] == 1) == known), given=f"{known.mean():.2f}")
 w = mo["weight"]
 check("loss weights are finite (exactly 1 with the model-noise guard off)", np.all(np.isfinite(w)) and (cfg.var_ratio > 0 or np.abs(w - 1).max() < 1e-3),
       efficiency=f"{w.sum() ** 2 / (w**2).sum() / n:.2f}", zero=f"{(w == 0).mean():.2f}")  # fmt: skip
@@ -68,7 +69,7 @@ worst = 0.0
 for i in np.flatnonzero(live)[:200]:
     e = encode_observation(mo["phi"][i][obs[i]] + 123.0, mo["r"][i][obs[i]], mo["sig"][i][obs[i]], cfg, grid, dissolved=bool(data["dissolved"][mo["pick"][i]]),
                            prog=prog_fraction(mo["phi"][i][0] + (l[i] - 0.5) * grid.bin_deg, mo["phi"][i][0], int(S[i]), grid.bin_deg))  # fmt: skip
-    worst = max(worst, np.abs(e["tokens"][obs[i]] - mo["tokens"][i][obs[i]]).max(), np.abs(e["cond"] - mo["cond"][i]).max(),
+    worst = max(worst, np.abs(e["tokens"][obs[i]] - mo["tokens"][i][obs[i]]).max(), np.abs(e["cond"] - mo["cond"][i])[[0, 2, 3]].max(),
                 abs(prior.from_latent(e["fixed_target_value"][[I_PROG]], cols=[I_PROG])[0] * (S[i] + 1) - (l[i] + 0.5)))  # fmt: skip
 check("real-track encoding reproduces the mock inputs and the progenitor position", worst < 1e-3, max_abs_diff=f"{worst:.1e}")
 enc = [encode_observation(o["theta_deg"], o["r"], o["r_err"], cfg, grid, dissolved=True) for o in load_observed(cfg)]
@@ -89,7 +90,7 @@ check("importance weights recover an analytic posterior mean", abs(np.sum(iw["we
 # --- the training dataset
 ds = SelectionDataset(data, seed=3, batch_size=64, adapter=build_adapter(cfg), drop_last=True, augmentations=[MockObservations(cfg, grid, design, 3)])
 b = ds[0]
-want = dict(inference_variables=(64, N_PAR), inference_conditions=(64, 3), summary_variables=(64, cfg.span_max, 5), sample_weight=(64,), fixed_target_mask=(64, N_PAR))
+want = dict(inference_variables=(64, N_PAR), inference_conditions=(64, 4), summary_variables=(64, cfg.span_max, 5), sample_weight=(64,), fixed_target_mask=(64, N_PAR))
 check("training batches have the shapes the estimator expects", all(b[k].shape == v for k, v in want.items()) and (("summary_mask" in b) == USES_MASK[cfg.summary]))
 zbar = data["z_strata"].mean(1)
 check("streams are drawn in proportion to Z", np.corrcoef(np.bincount(ds.indices, minlength=len(zbar)), zbar)[0, 1] > 0.5)

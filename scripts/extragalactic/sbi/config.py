@@ -1,12 +1,14 @@
-"""Settings of an SBI run. One dataclass; every field is a command-line option and the whole of it is written
-to `config.yaml` in the run directory, which is what `evaluation.py` (and anyone reproducing the run) reads.
+"""Settings of an SBI run. One dataclass serves training and both evaluations; every field is a command-line
+option and can be set in a YAML file:
 
-    uv run python scripts/extragalactic/sbi/train.py --name dm_v1 --inference diffusion --backbone transformer
-    uv run python scripts/extragalactic/sbi/train.py --config some/config.yaml --epochs 200   # file, then overrides
+    uv run python scripts/extragalactic/sbi/train.py           --config outputs/extragalactic/C26_test/npe_v2.yaml
+    uv run python scripts/extragalactic/sbi/evaluation.py      --config outputs/extragalactic/C26_test/npe_v2.yaml
+    uv run python scripts/extragalactic/sbi/evaluation_real.py --config outputs/extragalactic/C26_test/npe_v2.yaml
 
-Everything a run produces goes to one directory, <out>/models/<name>/: config.yaml, train.log, history.csv,
-model.keras (the epoch with the lowest held-out loss), evaluation/ (figures, metrics.json, posterior predictive
-simulations) and posterior_observed.npz.
+The file is a flat list of `field: value`; fields it leaves out keep their defaults; explicit options
+(`--epochs 200`) override the file. Everything a run produces goes to one directory, <out>/models/<name>/:
+config.yaml (the settings as used, with the prior, the data statistics and the commit), train.log, history.csv,
+model.keras (the epoch with the lowest held-out loss), evaluation/ and evaluation_real/.
 """
 
 from __future__ import annotations
@@ -49,7 +51,10 @@ class Config:
     gap_prob: float = 0.3  # share of mock tracks with missing interior bins
     gap_rate_max: float = 0.25  # each interior bin of such a track is missing with a rate U(0, this)
     sig_sys_max: float = 25.0  # kpc; sigma_sys ~ U(0, sig_sys_max), the prior of the paper
-    p_known: float = 0.5  # share of examples in which the progenitor position is given (fixed), not inferred
+    # share of examples in which the progenitor position is given to the network instead of inferred. 0 (decided
+    # 2026-11-23): never given; the released STRRINGS tracks carry no progenitor position, so it is a nuisance
+    # parameter the posterior marginalises over. 0.5 trains both queries (see mock.py)
+    p_known: float = 0.0
     # --- networks (networks.py)
     inference: str = "flow"  # flow (coupling, spline) | diffusion | flow_matching
     backbone: str = "mlp"  # subnet of diffusion / flow_matching: mlp | transformer (flow always uses an MLP)
@@ -69,6 +74,16 @@ class Config:
     lr: float = 5e-4
     seed: int = 2607
     cpu: bool = False  # stay off the GPUs
+    # --- evaluation (evaluation.py: mock tracks of held-out streams; evaluation_real.py: observed tracks)
+    n_test: int = 1000  # mock tracks for recovery, calibration and contraction
+    n_samples: int = 1000  # posterior draws per track
+    prog_given: bool = False  # pass the progenitor position to the network (needs p_known > 0 at training)
+    ppc_tracks: int = 6  # mock tracks in the posterior predictive check
+    ppc_draws: int = 64  # posterior draws per track that are simulated again (predictive check, importance weights)
+    real_tracks: str = ""  # observed tracks to evaluate, comma separated (e.g. NGC5907,NGC1162); "" = all 32
+    importance: bool = True  # importance weights of the simulated draws towards prior x likelihood of the paper
+    sim_workers: int = 16  # CPU worker processes generate.py uses for those simulations (about 10 core-seconds each)
+    sim_cores: str = ""  # cores to pin them to, e.g. 0-15; "" = no pinning
 
     def data_dir(self) -> Path:
         return REPO / self.out / "data" / self.subdir
@@ -83,14 +98,22 @@ class Config:
     @classmethod
     def load(cls, path: Path) -> tuple["Config", dict]:
         """-> (settings, everything else stored with them: prior, grid, data statistics, commit)."""
-        doc = yaml.safe_load(Path(path).read_text())
-        names = {f.name for f in dataclasses.fields(cls)}  # a file written before a field was removed still loads
-        return cls(**{k: tuple(v) if isinstance(v, list) else v for k, v in doc.pop("config").items() if k in names}), doc
+        doc = yaml.safe_load(Path(path).read_text()) or {}
+        nested = "config" in doc  # the file a run writes nests the settings under `config`; a hand-written one is flat
+        settings = doc.pop("config") if nested else doc
+        names = {f.name for f in dataclasses.fields(cls)}
+        if not nested and set(settings) - names:  # a typo in a hand-written file must not pass silently
+            raise SystemExit(f"{path}: unknown setting(s) {sorted(set(settings) - names)}")
+        return cls(**{k: tuple(v) if isinstance(v, list) else v for k, v in settings.items() if k in names}), (doc if nested else {})
 
 
-def parse(extra_args=()) -> tuple[Config, argparse.Namespace]:
-    """Command line -> (Config, the extra arguments of the calling script). `--config file.yaml` is read first,
-    explicit options override it. Also selects the device, so call this before importing jax or keras."""
+EVALUATION_FIELDS = ("n_test", "n_samples", "prog_given", "ppc_tracks", "ppc_draws", "real_tracks", "importance",
+                     "sim_workers", "sim_cores", "cpu")  # fmt: skip
+
+
+def parse() -> Config:
+    """Command line -> Config. `--config file.yaml` is read first, explicit options override it. Also selects
+    the device, so call this before importing jax or keras."""
     p = argparse.ArgumentParser()
     p.add_argument("--config", default="")
     for f in dataclasses.fields(Config):
@@ -99,16 +122,24 @@ def parse(extra_args=()) -> tuple[Config, argparse.Namespace]:
             p.add_argument(flag, action=argparse.BooleanOptionalAction, default=None)
         else:
             p.add_argument(flag, default=None, type=(lambda s: tuple(float(x) for x in s.split(","))) if isinstance(d, tuple) else type(d))
-    names = []
-    for flag, kw in extra_args:
-        names.append(p.add_argument(flag, **kw).dest)
     a = vars(p.parse_args())
     path = a.pop("config")
-    cfg = Config.load(path)[0] if path else Config()
-    extras = argparse.Namespace(**{n: a.pop(n) for n in names})
-    cfg = dataclasses.replace(cfg, **{k: v for k, v in a.items() if v is not None})
+    cfg = dataclasses.replace(Config.load(path)[0] if path else Config(), **{k: v for k, v in a.items() if v is not None})
     cfg.device = pick_device(cfg.cpu)
-    return cfg, extras
+    return cfg
+
+
+def trained(cfg: Config) -> Path:
+    """The run directory of a trained model, after checking that the settings in hand are the ones it was
+    trained with (the evaluation settings may differ)."""
+    run = cfg.run_dir()
+    if not (run / "model.keras").exists():
+        raise SystemExit(f"no trained model in {run}: run train.py with the same settings first")
+    then = dataclasses.asdict(Config.load(run / "config.yaml")[0])
+    diff = {k: (then[k], v) for k, v in dataclasses.asdict(cfg).items() if k not in EVALUATION_FIELDS and then[k] != v}
+    if diff:
+        raise SystemExit(f"settings differ from those {run.name} was trained with (trained, now): {diff}")
+    return run
 
 
 def pick_device(cpu: bool) -> str:

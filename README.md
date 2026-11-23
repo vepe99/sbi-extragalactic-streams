@@ -108,11 +108,12 @@ in the order of StreaMAX-fit) plus the position of the progenitor along the trac
 environment with the JAX backend of Keras; without `--cpu` a free GPU is taken with autocvd.
 
 ```bash
-uv run python scripts/extragalactic/sbi/check.py --cpu                 # tests of the pieces below
-uv run python scripts/extragalactic/sbi/train.py --name npe_v2         # coupling flow, transformer summary
-uv run python scripts/extragalactic/sbi/train.py --name dm_v1 --inference diffusion --backbone transformer
-uv run python scripts/extragalactic/sbi/evaluation.py --name npe_v2    # recovery, calibration, contraction, ppc, observed
+uv run python scripts/extragalactic/sbi/train.py           --config outputs/extragalactic/C26_test/npe_v2.yaml
+uv run python scripts/extragalactic/sbi/evaluation.py      --config outputs/extragalactic/C26_test/npe_v2.yaml   # mock tracks
+uv run python scripts/extragalactic/sbi/evaluation_real.py --config outputs/extragalactic/C26_test/npe_v2.yaml   # observed tracks
 ```
+
+One YAML file holds the settings of a run and drives all three (add `--extra gpu` after `uv run` on a GPU machine).
 
 | file | what it holds |
 |---|---|
@@ -122,23 +123,25 @@ uv run python scripts/extragalactic/sbi/evaluation.py --name npe_v2    # recover
 | `likelihood.py` | eq. 4 of 2026b with its two guards, and importance weights |
 | `networks.py` | summary and inference networks, built into a BayesFlow workflow |
 | `train.py` | the training run and its log |
-| `evaluation.py` | recovery, calibration, posterior contraction, posterior predictive checks, the observed tracks |
+| `evaluation.py` | mock tracks: loss curve, recovery, calibration, contraction, posterior predictive check |
+| `evaluation_real.py` | observed tracks: posteriors, posterior predictive checks, importance weights |
+| `predictive.py` | posterior draws, their simulations, predictive check and importance weights (shared) |
 | `check.py` | self-tests |
 
 Everything a run produces is in one directory, `outputs/extragalactic/C26_test/models/<name>/` (not tracked):
 `config.yaml` (all settings, the prior, the commit), `train.log` (one line per epoch), `history.csv`, `model.keras` (the epoch with
-the lowest held-out loss), `evaluation/` (figures, `metrics.json`, the simulations of the predictive check) and
-`posterior_observed.npz`.
+the lowest held-out loss), `evaluation/` and `evaluation_real/` (figures, `metrics.json`, posterior draws, the
+simulations of the predictive checks).
 
 | option | default | meaning |
 |---|---|---|
 | `--inference` | `flow` | `flow` (coupling flow, spline), `diffusion` or `flow_matching` |
 | `--backbone` | `mlp` | subnet of `diffusion` / `flow_matching`: `mlp` or `transformer` (BayesFlow's DiffusionTransformer) |
 | `--summary` | `transformer` | `transformer` (attention over the bins, angle as time axis), `timeseries` (conv + GRU), `mlp` |
-| `--p-known` | 0.5 | share of training examples in which the progenitor position is given to the network |
+| `--p-known` | 0 | share of training examples in which the progenitor position is given to the network; 0 = always inferred (decided 2026-11-23: the released tracks carry no progenitor position) |
 | `--ordering` | `c26` | track to train on: `c26` or `gibbons14` (the ordering of 2026b, stored as `track_alt/`) |
 | `--var-ratio` | 9 | the paper's model-noise guard; 0 switches it off |
-| `--config` | | a `config.yaml` to start from; explicit options override it |
+| `--config` | | the YAML file of the run; explicit options override it |
 
 `scripts/extragalactic/sbi/README.md` says how to run, configure and extend it. How it works, in short (each file's docstring has the detail):
 
@@ -152,9 +155,10 @@ the lowest held-out loss), `evaluation/` (figures, `metrics.json`, the simulatio
   random window, so the training distribution is the prior times "the model covers the data" (the paper's two
   guards), with no preference for short or long simulated streams.
 - **Progenitor position.** The paper fixes one sky coordinate of the progenitor. Here its position along the
-  track is a 15th parameter that is marked as given in half of the examples (BayesFlow's `fixed_target_mask`)
-  and inferred in the rest. At inference it can be fixed at the centre of the track (the paper), at a visible
-  progenitor, or left free.
+  track is a 15th parameter, uniform a priori. By default it is always inferred, as a nuisance the posterior
+  marginalises over. With `--p-known 0.5` it is marked as given in half of the examples (BayesFlow's
+  `fixed_target_mask`), and can then be fixed at inference: at the centre of the track (the paper) or at a
+  visible progenitor.
 - **Posterior predictive checks** simulate posterior draws again: `evaluation.py` calls
   `generate.py run --theta-file`, which simulates given parameters with the physics of the training set.
 

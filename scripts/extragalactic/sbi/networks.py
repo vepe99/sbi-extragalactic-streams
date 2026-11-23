@@ -9,8 +9,10 @@
                 timeseries      convolutions + bidirectional GRU along the angle
                 mlp             the track flattened into one vector
 
-All three inference networks accept `fixed_target_mask`: a parameter marked as fixed is given to the network
-and left out of the density. That is how the progenitor position is passed when it is known (mock.py).
+All three inference networks accept `fixed_target_mask`: a parameter marked as fixed is clamped to its given
+value and left out of the density. That is how the progenitor position is passed when it is known (mock.py).
+Only the DiffusionTransformer is told per coordinate what is fixed; the other subnets learn it from the
+"position given" flag in the conditions.
 """
 
 from __future__ import annotations

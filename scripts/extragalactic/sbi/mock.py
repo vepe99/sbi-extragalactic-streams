@@ -20,7 +20,11 @@ the centre of the track). Here its position along the track is the 15th paramete
 with u ~ U(0, 1), uniform a priori. In a share `p_known` of the examples it is marked as fixed
 (`fixed_target_mask` = 0): the network is then given its value and infers the other 14, as in the paper. In the
 rest it is inferred with them. At inference either is available: fix it at 0.5 (the centre), at a visible
-progenitor, or leave it free.
+progenitor, or leave it free. In BayesFlow's terms this is a fixed target, p(theta_14 | prog = value, track): the
+position is a parameter of the model whose value is known, not a piece of data that may be missing
+(`observed_condition_mask`) nor a parameter to integrate out (`infer_target_mask`; that marginal is the joint
+posterior with the column dropped). The mask only clamps the coordinate; a coupling flow or an MLP subnet is not
+told which case it is in, so the conditions also carry a "position given" flag.
 """
 
 from __future__ import annotations
@@ -38,18 +42,19 @@ from config import Config
 from data import I_PROG, N_PAR, Grid
 
 
-def featurise(phi, r, sig, obs, dissolved):
+def featurise(phi, r, sig, obs, dissolved, known):
     """One track on the token grid -> network inputs; the same function serves mock and real tracks.
 
     tokens (T, 5): angle / 90 deg, observed flag, r / rbar - 1, sigma / rbar, log10 sigma (zero where unobserved)
-    cond (3,):     progenitor dissolved (mass ramped to zero) or not, log10(rbar / 30 kpc), points / 32
+    cond (4,):     progenitor dissolved (mass ramped to zero) or not, progenitor position given or not,
+                   log10(rbar / 30 kpc), points / 32
     """
     w = obs.astype(jnp.float32)
     n = jnp.maximum(w.sum(), 1.0)
     rbar = jnp.clip((w * r).sum() / n, 3.0, 1000.0)  # mean observed radius
     sig = jnp.maximum(sig, 1e-3)
     tokens = jnp.stack([phi / 90.0, w, w * jnp.clip(r / rbar - 1, -20, 20), w * jnp.minimum(sig / rbar, 20), w * jnp.log10(sig)], -1)
-    return tokens, jnp.stack([jnp.asarray(dissolved, jnp.float32), jnp.log10(rbar / 30.0), n / 32.0])
+    return tokens, jnp.stack([jnp.asarray(dissolved, jnp.float32), jnp.asarray(known, jnp.float32), jnp.log10(rbar / 30.0), n / 32.0])
 
 
 def make_mock(cfg: Config, grid: Grid, design: dict):
@@ -94,11 +99,12 @@ def make_mock(cfg: Config, grid: Grid, design: dict):
         xs = jnp.sort(jnp.where(obs, phi_sim, jnp.inf))
         n = obs.sum()
         phi = phi_sim - 0.5 * (xs[(n - 1) // 2] + xs[n // 2])  # minus the median, as np.median
-        tokens, cond = featurise(phi, r, sig, obs, dissolved)
+        known = jr.bernoulli(k[11], cfg.p_known)  # is the progenitor position given to the network?
+        tokens, cond = featurise(phi, r, sig, obs, dissolved, known)
         # the two parameters that exist only in the observation, in latent coordinates
         prog = (l + jr.uniform(k[10], minval=1e-4, maxval=1 - 1e-4)) / (S + 1.0)
         zeta2 = ndtri(jnp.stack([jnp.clip(sig_sys / cfg.sig_sys_max, 1e-6, 1 - 1e-6), prog]))
-        fixed = jnp.ones(N_PAR).at[I_PROG].set(1.0 - jr.bernoulli(k[11], cfg.p_known))  # 0 = given, 1 = inferred
+        fixed = jnp.ones(N_PAR).at[I_PROG].set(1.0 - known)  # 0 = given, 1 = inferred
         return dict(tokens=tokens, mask=obs, cond=cond, weight=weight, zeta2=zeta2, fixed_target_mask=fixed,
                     r=r, sig=sig, phi=phi, sig_sys=sig_sys, S=S, l=l, a=a, b=b, m=m, hw=r_hw[bins], n=count[bins])  # fmt: skip
 
@@ -176,7 +182,7 @@ def encode_observation(theta_deg, r, r_err, cfg: Config, grid: Grid, *, dissolve
     rg, sg, og = np.zeros(T, np.float32), np.ones(T, np.float32), np.zeros(T, bool)
     rg[kk], sg[kk], og[kk] = r, r_err, True
     phig = (phi[0] + grid.bin_deg * np.arange(T)).astype(np.float32)
-    tokens, cond = featurise(*(jnp.asarray(x) for x in (phig, rg, sg, og)), float(dissolved))
+    tokens, cond = featurise(*(jnp.asarray(x) for x in (phig, rg, sg, og)), float(dissolved), float(prog is not None))
     fixed, value = np.ones(N_PAR, np.float32), np.zeros(N_PAR, np.float32)
     if prog is not None:
         fixed[I_PROG], value[I_PROG] = 0.0, float(ndtri(prog))

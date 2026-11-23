@@ -1,9 +1,9 @@
 """Train an amortised posterior estimator for extragalactic stream tracks (BayesFlow, JAX backend).
 
-    uv run python scripts/extragalactic/sbi/train.py --name npe_v2
+    uv run python scripts/extragalactic/sbi/train.py --config outputs/extragalactic/C26_test/npe_v2.yaml
     uv run python scripts/extragalactic/sbi/train.py --name dm_v1 --inference diffusion --backbone transformer
 
-Every field of `Config` (config.py) is an option. Without --cpu a free GPU is taken with autocvd.
+Settings come from the YAML file and/or options (config.py). Without --cpu a free GPU is taken with autocvd.
 Written to <out>/models/<name>/: config.yaml (all settings), train.log (one line per epoch), history.csv,
 model.keras (the epoch with the lowest held-out loss, rewritten whenever it improves).
 
@@ -21,7 +21,7 @@ import time
 
 from config import REPO, parse
 
-cfg, _ = parse()  # selects the device: must come before jax / keras are imported
+cfg = parse()  # selects the device: must come before jax / keras are imported
 
 import jax  # noqa: E402
 import keras  # noqa: E402
