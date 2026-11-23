@@ -11,8 +11,8 @@ dataset is the starting point for testing whether an amortized posterior estimat
 
 - `scripts/extragalactic/generate.py`: prior, simulator, tests, pilot, production run, diagnostics
 - `scripts/extragalactic/plot.py`: figures
-- `scripts/extragalactic/train.py`: amortised posterior estimation with BayesFlow (mock observations, the
-  likelihood, training, posterior samples for the observed tracks); see "Amortised inference" below
+- `scripts/extragalactic/sbi/`: amortised posterior estimation with BayesFlow (training, evaluation, and the
+  pieces they share); see "Amortised inference" below
 - `scripts/extragalactic/inspect_prior.py`: prior inspection ahead of amortized inference (usable fraction, what the selection
   cuts do to the prior, where the integrator fails, the prior predictive against the STRRINGS streams)
 - `scripts/extragalactic/prior_predictive.py`: prior predictive checks of a set (finished or partial) against the observed
@@ -103,49 +103,60 @@ uv run python scripts/extragalactic/inspect_prior.py --subdir c26_100k   # plots
 
 ## Amortised inference
 
-`scripts/extragalactic/train.py` trains a normalizing flow on the 14 parameters of 2026b (table A1, in the order
-of StreaMAX-fit: `logM Rs dirx diry dirz logm rs x0 z0 vx0 vy0 vz0 time sig`), conditioned on a summary of the
-track. It runs in the project environment with the JAX backend of Keras:
+`scripts/extragalactic/sbi/` trains and evaluates a posterior estimator for the 14 parameters of 2026b (table A1,
+in the order of StreaMAX-fit) plus the position of the progenitor along the track. It runs in the project
+environment with the JAX backend of Keras; without `--cpu` a free GPU is taken with autocvd.
 
 ```bash
-uv run python scripts/extragalactic/train.py check     # tests of the transforms, mock observations, likelihood
-uv run python scripts/extragalactic/train.py train     # -> outputs/extragalactic/C26_test/models/<name>/
-uv run python scripts/extragalactic/train.py sample    # posterior samples + log q for the 32 observed tracks
+uv run python scripts/extragalactic/sbi/check.py --cpu                 # tests of the pieces below
+uv run python scripts/extragalactic/sbi/train.py --name npe_v2         # coupling flow, transformer summary
+uv run python scripts/extragalactic/sbi/train.py --name dm_v1 --inference diffusion --backbone transformer
+uv run python scripts/extragalactic/sbi/evaluation.py --name npe_v2    # recovery, calibration, contraction, ppc, observed
 ```
 
-Without `--cpu` a free GPU is taken with autocvd when the machine has one. A run directory holds `train.log`
-(a line every `--log-every` steps and one per epoch), `history.csv`, `last.keras` (every epoch), `best.keras`
-(every epoch that improves the held-out loss), `best.json` and `config.json`. `--resume` continues an
-interrupted run; the learning-rate schedule is the one fixed at the first start.
+| file | what it holds |
+|---|---|
+| `config.py` | every setting in one dataclass; command-line options; `config.yaml`; device choice |
+| `data.py` | shards to arrays, the prior and its latent coordinates, the window prior, the observed tracks |
+| `mock.py` | the mock observation model in JAX (the only augmentation) and the dataset that draws streams |
+| `likelihood.py` | eq. 4 of 2026b with its two guards, and importance weights |
+| `networks.py` | summary and inference networks, built into a BayesFlow workflow |
+| `train.py` | the training run and its log |
+| `evaluation.py` | recovery, calibration, posterior contraction, posterior predictive checks, the observed tracks |
+| `check.py` | self-tests |
+
+Everything a run produces is in one directory, `outputs/extragalactic/C26_test/models/<name>/` (not tracked):
+`config.yaml` (all settings, the prior, the commit), `train.log` (one line per epoch), `history.csv`, `model.keras` (the epoch with
+the lowest held-out loss), `evaluation/` (figures, `metrics.json`, the simulations of the predictive check) and
+`posterior_observed.npz`.
 
 | option | default | meaning |
 |---|---|---|
-| `--summary` | `transformer` | summary network: `transformer` (attention over the bins, the angle as explicit time axis), `timeseries` (convolutions + GRU), `mlp` (flattened track) |
+| `--inference` | `flow` | `flow` (coupling flow, spline), `diffusion` or `flow_matching` |
+| `--backbone` | `mlp` | subnet of `diffusion` / `flow_matching`: `mlp` or `transformer` (BayesFlow's DiffusionTransformer) |
+| `--summary` | `transformer` | `transformer` (attention over the bins, angle as time axis), `timeseries` (conv + GRU), `mlp` |
+| `--p-known` | 0.5 | share of training examples in which the progenitor position is given to the network |
 | `--ordering` | `c26` | track to train on: `c26` or `gibbons14` (the ordering of 2026b, stored as `track_alt/`) |
-| `--n-min` | 10 | model particles a bin needs to be compared with data (3 of 10,000 in the paper) |
-| `--var-ratio` | 9 | the paper's model-noise guard: variance of the model track at most 1/9 of the data variance; 0 switches it off |
-| `--span-prior` | `loguniform` | distribution of the track length (6 to 64 bins) of the training examples |
-| `--prog-position` | `centre` | progenitor at the middle of the mock track, as 2026b assumes; `random` puts it on any bin edge of the track and gives its angle to the network in a fraction `--p-known` of the examples |
-| `--prog-mode` | `centre` | `sample`: progenitor at the middle of the track (2026b) or `free` (marginalised) |
-| `--sig-sys-power` | 1 | training draws of sigma_sys: 1 is the prior U(0, 25) kpc; larger concentrates them at small values |
+| `--var-ratio` | 9 | the paper's model-noise guard; 0 switches it off |
+| `--config` | | a `config.yaml` to start from; explicit options override it |
 
-The module docstring states the frame conventions, the mock observation model and the likelihood. In short:
+`scripts/extragalactic/sbi/README.md` says how to run, configure and extend it. How it works, in short (each file's docstring has the detail):
 
-- **Parameters** are trained in latent coordinates in which the prior is a standard normal (the normal quantile
-  of dynesty's unit cube), so importance weights need no Jacobian.
+- **Latent coordinates.** Networks work on the normal quantile of dynesty's unit cube, where the prior is a
+  standard normal, so importance weights need no Jacobian.
 - **No rotation or mirror augmentation.** The prior of the paper keeps one copy of every set of equivalent
-  systems (y0 = 0, x0 > 0, vy0 > 0, z0 > 0, dirz >= 0), so a rotated or mirrored example is either identical or
-  outside the prior. Tracks are centred on their median angle, as StreaMAX-fit does, and the progenitor sits
-  at the centre of the mock track, as the paper assumes (decided 2026-11-23).
-- **Each training example** is a new mock observation of a stored simulation: a random window of the track,
-  random gaps, radial errors drawn over the observed range, sigma_sys from its prior, and radii scattered as
+  systems (y0 = 0, x0 > 0, vy0 > 0, z0 > 0, dirz >= 0), so a transformed example is identical or outside it.
+- **Mock observations.** Each training example is a new observation of a stored simulation: a window of the
+  track, gaps, radial errors, sigma_sys from its prior, and radii drawn from the likelihood
   N(model, sigma_data^2 + sigma_sys^2). Simulations are drawn in proportion to the chance that they cover a
   random window, so the training distribution is the prior times "the model covers the data" (the paper's two
-  guards), with no preference for short or long simulated streams. 35 % of the examples are 24 bins or longer,
-  against 44 % of the observed tracks.
-- **The likelihood** of 2026b (eq. 4 with its two guards) is `log_likelihood`; `importance_weights` turns
-  posterior samples, their log q and their likelihood into weights and an effective sample size. Evaluating
-  the likelihood of new samples needs their tracks from `generate.py`; that step is not written yet.
+  guards), with no preference for short or long simulated streams.
+- **Progenitor position.** The paper fixes one sky coordinate of the progenitor. Here its position along the
+  track is a 15th parameter that is marked as given in half of the examples (BayesFlow's `fixed_target_mask`)
+  and inferred in the rest. At inference it can be fixed at the centre of the track (the paper), at a visible
+  progenitor, or left free.
+- **Posterior predictive checks** simulate posterior draws again: `evaluation.py` calls
+  `generate.py run --theta-file`, which simulates given parameters with the physics of the training set.
 
 ## Hardware
 

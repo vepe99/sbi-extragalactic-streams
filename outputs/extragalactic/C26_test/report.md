@@ -526,6 +526,46 @@ tracks in the same frame).
   odd number of points and the progenitor at the centre fall between two trained offsets.
 - The mock errors are independent between bins; real errors may be correlated along a track.
 
+### Restructured into `scripts/extragalactic/sbi/` (2026-11-23, asked by the user)
+
+The single 1,066-line `train.py` is replaced by eight files (1,050 lines with the new evaluation): `config.py`,
+`data.py`, `mock.py`, `likelihood.py`, `networks.py`, `train.py` (101 lines), `evaluation.py`, `check.py`.
+What changed besides the layout:
+
+- **Settings in YAML.** Every run writes `config.yaml` (settings, prior, grid, data statistics, window prior,
+  commit); `evaluation.py` reads it, and `train.py --config file.yaml` starts from one.
+- **BayesFlow workflow.** Training goes through `bf.BasicWorkflow`, as in BayesFlow's diffusion-model example:
+  it owns the optimizer (AdamW, cosine decay with warm-up) and the checkpoint `model.keras`, rewritten at every
+  epoch that lowers the held-out loss. `--resume` is gone.
+- **Inference networks.** `--inference flow | diffusion | flow_matching`, and for the last two
+  `--backbone mlp | transformer` (BayesFlow's DiffusionTransformer).
+- **Progenitor position as a parameter that can be given.** `prog`, the fraction of the way along the track at
+  which the progenitor sits, is a 15th parameter, uniform a priori. In a share `--p-known` of the examples it
+  is marked as fixed with BayesFlow's `fixed_target_mask`: the network is given its value and infers the other
+  14, which is the paper's setting. In the rest it is inferred. This replaces the `--prog-position` switch.
+- **`evaluation.py`.** Recovery, calibration (rank ECDF), z-score against contraction, all from BayesFlow's
+  diagnostics on mock tracks of held-out streams; posterior predictive checks; posteriors of the 32 observed
+  tracks. Numbers in `metrics.json`.
+- **Posterior predictive checks re-simulate.** `generate.py` gained `--theta-file` (stream k is simulated with
+  row k of a file instead of a prior draw; the prior and the simulator are untouched and the option enters the
+  physics hash). `evaluation.py` runs it on posterior draws with the physics of the training set, compares
+  replicated data with the track, and for a coupling flow also reports the importance-sampling efficiency.
+- **One directory per run:** `models/<name>/` holds `config.yaml`, `train.log`, `history.csv`, `model.keras`,
+  `evaluation/` and `posterior_observed.npz`.
+- **Two defaults taken from the user's edit of the old file:** 6 hidden layers in the MLP of each coupling
+  layer (`--flow-layers`) and the run name `npe_v2`.
+
+Smoke tests on the first 200 shards, CPU, 2 epochs each (`models/t_flow`, `t_dm`, `t_fm`): all three inference
+networks train and save; `evaluation.py` ran in full on the flow (72 posterior draws re-simulated in 316 s on
+12 cores) and without the predictive check on the diffusion model with the transformer backbone. `check.py`
+passes with the default settings and with `--var-ratio 0 --summary mlp`. These models are barely trained;
+their figures show that the pipeline runs, not what the method can do.
+
+Not done: no training on the full set; the summary-network comparison above predates this layout; sampling
+with a fixed seed did not reproduce the same draws in a second process, so the predictive check re-simulated
+instead of reusing its files (cause not looked into). The defaults as they now stand (6-layer coupling MLP,
+transformer summary) were run for one epoch only, to confirm that they start and save.
+
 ## Clean-up of `data/` (2026-11-23, asked by the user)
 
 Deleted, 906 MB in all; `train_v1/` was running and was not touched:

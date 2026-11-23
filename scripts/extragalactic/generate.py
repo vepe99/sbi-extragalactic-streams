@@ -132,6 +132,9 @@ class Config:
     cpu_workers: int = 1  # with --cpu, `run` starts this many worker processes (disjoint blocks of shards)
     cpu_cores: str = ""  # with --cpu, cores shared out among the workers, e.g. "0-47,64-111"; "" = no pinning
     overwrite: bool = False
+    # npz with `theta` (n, 13) and optionally `dissolved` (n,): stream k is simulated with row k instead of a prior
+    # draw (posterior predictive checks and importance sampling; the prior itself is untouched)
+    theta_file: str = ""
     # --- tests
     n_energy: int = 200
     n_test_streams: int = 32  # prior draws simulated by `test` to find bound streams for the StreaMAX check
@@ -158,6 +161,8 @@ class Config:
             d.update(integrator=self.integrator, max_steps=self.max_steps, rtol=self.rtol)
             if self.solver != "dopri8":  # only when used, so that the hash of the dopri8 sets does not change
                 d["solver"] = self.solver
+        if self.theta_file:
+            d["theta_file"] = hashlib.sha1(Path(self.theta_file).read_bytes()).hexdigest()[:12]
         blob = json.dumps(d, sort_keys=True)
         return hashlib.sha1(blob.encode()).hexdigest()[:12]
 
@@ -413,6 +418,8 @@ def stream_keys(cfg: Config, idx):
 
 
 def draw_prior(cfg: Config, idx) -> np.ndarray:
+    if cfg.theta_file:  # given parameters, not prior draws
+        return np.load(cfg.theta_file)["theta"][np.asarray(idx)].astype(np.float64)  # the dtype of a prior draw
     kp, _ = stream_keys(cfg, idx)
     return np.asarray(jax.vmap(lambda a: sample_prior(a, cfg))(kp))
 
@@ -421,6 +428,8 @@ def draw_dissolved(cfg: Config, idx) -> np.ndarray:
     """Progenitor state of streams `idx`: True = mass ramped to 1 Msun over t_int (2026b, no visible progenitor),
     False = constant mass (C26, the progenitor is still there). `mixed` draws it per stream from its own key."""
     idx = np.asarray(idx)
+    if cfg.theta_file and "dissolved" in np.load(cfg.theta_file).files:
+        return np.load(cfg.theta_file)["dissolved"][idx].astype(bool)
     if cfg.progenitor_mass_loss != "mixed":
         return np.full(idx.shape, cfg.progenitor_mass_loss == "linear")
     master = jr.key(cfg.seed)
