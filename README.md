@@ -11,6 +11,8 @@ dataset is the starting point for testing whether an amortized posterior estimat
 
 - `scripts/extragalactic/generate.py`: prior, simulator, tests, pilot, production run, diagnostics
 - `scripts/extragalactic/plot.py`: figures
+- `scripts/extragalactic/train.py`: amortised posterior estimation with BayesFlow (mock observations, the
+  likelihood, training, posterior samples for the observed tracks); see "Amortised inference" below
 - `analysis/inspect_prior.py`: prior inspection ahead of amortized inference (usable fraction, what the selection
   cuts do to the prior, where the integrator fails, the prior predictive against the STRRINGS streams)
 - `analysis/prior_predictive.py`: prior predictive checks of a set (finished or partial) against the observed
@@ -25,8 +27,9 @@ Generated data (`outputs/**/data/`) and figures (`outputs/**/plots/`) are not tr
 ## Decisions
 
 - **STRRINGS sample (2026-11-22, Giuseppe):** NGC1084, NGC1121 and PGC021008 are excluded from every comparison
-  and from inference; 32 of the 35 streams are used. They are the three streams StreaMAX-fit does not release
-  (dropped by its export script as measurement failures). Encoded as `STRRINGS_EXCLUDED` in
+  and from inference; 32 of the 35 streams are used. This is the sample of 2026b (its section 2): PGC021008 is
+  bright enough to have been modelled away with the host light, NGC1084 could not be fitted and may be a spiral
+  arm, and NGC1121 is a three-loop stream left to a dedicated study. Encoded as `STRRINGS_EXCLUDED` in
   `analysis/inspect_prior.py`.
 - **Observed tracks:** the 32 tracks released with [StreaMAX-fit](https://github.com/David-Chemaly/StreaMAX-fit)
   at commit `2e6a708` (MIT licence). `analysis/inspect_prior.py` fetches them into
@@ -94,6 +97,52 @@ CUDA 12 wheels. The five commands above do not use it; they run from the script 
 ```bash
 uv run python analysis/inspect_prior.py    # plots/prior_inspection/ + data/prior_inspection.json
 ```
+
+## Amortised inference
+
+`scripts/extragalactic/train.py` trains a normalizing flow on the 14 parameters of 2026b (table A1, in the order
+of StreaMAX-fit: `logM Rs dirx diry dirz logm rs x0 z0 vx0 vy0 vz0 time sig`), conditioned on a summary of the
+track. It runs in the project environment with the JAX backend of Keras:
+
+```bash
+uv run python scripts/extragalactic/train.py check     # tests of the transforms, mock observations, likelihood
+uv run python scripts/extragalactic/train.py train     # -> outputs/extragalactic/C26_test/models/<name>/
+uv run python scripts/extragalactic/train.py sample    # posterior samples + log q for the 32 observed tracks
+```
+
+Without `--cpu` a free GPU is taken with autocvd when the machine has one. A run directory holds `train.log`
+(a line every `--log-every` steps and one per epoch), `history.csv`, `last.keras` (every epoch), `best.keras`
+(every epoch that improves the held-out loss), `best.json` and `config.json`. `--resume` continues an
+interrupted run; the learning-rate schedule is the one fixed at the first start.
+
+| option | default | meaning |
+|---|---|---|
+| `--summary` | `transformer` | summary network: `transformer` (attention over the bins, the angle as explicit time axis), `timeseries` (convolutions + GRU), `mlp` (flattened track) |
+| `--ordering` | `c26` | track to train on: `c26` or `gibbons14` (the ordering of 2026b, stored as `track_alt/`) |
+| `--n-min` | 10 | model particles a bin needs to be compared with data (3 of 10,000 in the paper) |
+| `--var-ratio` | 9 | the paper's model-noise guard: variance of the model track at most 1/9 of the data variance; 0 switches it off |
+| `--span-prior` | `loguniform` | distribution of the track length (6 to 64 bins) of the training examples |
+| `--prog-position` | `centre` | progenitor at the middle of the mock track, as 2026b assumes; `random` puts it on any bin edge of the track and gives its angle to the network in a fraction `--p-known` of the examples |
+| `--prog-mode` | `centre` | `sample`: progenitor at the middle of the track (2026b) or `free` (marginalised) |
+| `--sig-sys-power` | 1 | training draws of sigma_sys: 1 is the prior U(0, 25) kpc; larger concentrates them at small values |
+
+The module docstring states the frame conventions, the mock observation model and the likelihood. In short:
+
+- **Parameters** are trained in latent coordinates in which the prior is a standard normal (the normal quantile
+  of dynesty's unit cube), so importance weights need no Jacobian.
+- **No rotation or mirror augmentation.** The prior of the paper keeps one copy of every set of equivalent
+  systems (y0 = 0, x0 > 0, vy0 > 0, z0 > 0, dirz >= 0), so a rotated or mirrored example is either identical or
+  outside the prior. Tracks are centred on their median angle, as StreaMAX-fit does, and the progenitor sits
+  at the centre of the mock track, as the paper assumes (decided 2026-11-23).
+- **Each training example** is a new mock observation of a stored simulation: a random window of the track,
+  random gaps, radial errors drawn over the observed range, sigma_sys from its prior, and radii scattered as
+  N(model, sigma_data^2 + sigma_sys^2). Simulations are drawn in proportion to the chance that they cover a
+  random window, so the training distribution is the prior times "the model covers the data" (the paper's two
+  guards), with no preference for short or long simulated streams. 35 % of the examples are 24 bins or longer,
+  against 44 % of the observed tracks.
+- **The likelihood** of 2026b (eq. 4 with its two guards) is `log_likelihood`; `importance_weights` turns
+  posterior samples, their log q and their likelihood into weights and an effective sample size. Evaluating
+  the likelihood of new samples needs their tracks from `generate.py`; that step is not written yet.
 
 ## Hardware
 

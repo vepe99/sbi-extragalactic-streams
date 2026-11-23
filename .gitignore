@@ -15,3 +15,6 @@ __pycache__/
 
 # third-party source checkouts
 external/
+
+# trained models and their logs
+outputs/**/models/

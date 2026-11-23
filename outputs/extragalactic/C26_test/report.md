@@ -394,6 +394,138 @@ no difference. The user first asked for a cap of 400 and chose 2,500 on these nu
 Expected: about 12 hours for 500,000 streams (4.9 million core-seconds on 112 cores), 1.5 GB of tracks and
 3.6 GB of particles. *Results, timings and the prior predictive checks are added when the run is complete.*
 
+## Inference pipeline `scripts/extragalactic/train.py` (2026-11-23, written while `train_v1` was running)
+
+Asked for: BayesFlow added to `pyproject.toml`; a training script with a normalizing flow, the JAX backend,
+BayesFlow's offline dataset and augmentation hook, augmentations written in JAX (GPU when there is one), a log
+file, a checkpoint at every best epoch, the likelihood written out for importance sampling, and a setup as
+close as possible to 2026b. `bayesflow==2.1.0` (Keras 3.15, JAX backend) is pinned in `pyproject.toml`.
+
+### What 2026b fixes, and how the script follows it
+
+| item | 2026b (paper and StreaMAX-fit at `2e6a708`) | `train.py` |
+|---|---|---|
+| parameters | 14: `logM Rs dirx diry dirz logm rs x0 z0 vx0 vy0 vz0 time sig` | the same 14 in the same order |
+| prior | table A1 | read from the configuration stored in the shards; identical to table A1 |
+| likelihood | eq. 4: Gaussian per bin, variance sigma_data^2 + sigma_sys^2, sigma_sys ~ U(0, 25) kpc | mock radii are drawn from exactly this; `log_likelihood` is eq. 4 |
+| model track | median radius per 10 deg bin (`get_track_2D`), 16-84 half-width for the model noise | `r_med`, `r_hw`, `count` of the shards |
+| data frame | angle minus the median angle of the track; progenitor at angle 0 | the same |
+| guard 1 | at least 3 model particles in every observed bin (of at least 10,000) | `--n-min 10` of 30,000 |
+| guard 2 | model variance at most 1/9 of the data variance | `--var-ratio 9`, at the 30,000 particles of the set (below) |
+| progenitor | mass ramped to zero if none is visible, constant if one is | `prog/dissolved` is a condition of the network |
+| ordering | Gibbons et al. 2014 | `--ordering gibbons14` trains on `track_alt/`; default is the C26 ordering of `track/` |
+
+Table A1 of 2026b is the prior the simulations already use (R_s in 10-25 kpc, r_s in 1-5 kpc, z0 > 0,
+velocities in km/s). The public StreaMAX-fit code differs from that table in four places (R_s from 5 kpc,
+r_s to 3 kpc, z0 of either sign, velocities of 250 in kpc/Gyr); the script follows the paper.
+
+### Design decisions
+
+- **Latent coordinates.** The flow is trained on zeta = Phi^-1(F(parameter)), F the prior cdf. The prior is
+  N(0, I) in zeta and F(parameter) is dynesty's unit cube, so importance weights are
+  N(zeta; 0, I) L / q with no Jacobian.
+- **No rotation or mirror augmentation (confirmed with the user, 2026-11-23).** The prior keeps one copy of
+  every set of equivalent systems: y0 = 0 with x0 > 0 removes rotations about the line of sight, vy0 > 0 the
+  left-right mirror, z0 > 0 the front-back mirror, dirz >= 0 the sign of the halo axis. A rotated or mirrored
+  example is identical or outside the prior, and flipping the track while keeping vy0 > 0 would swap the
+  leading and trailing arms, which are only approximately alike. The only randomness added to a simulation is
+  the observation: which bins are seen, with which errors, and the noise drawn from the likelihood.
+- **Progenitor at the centre of the track**, as the paper assumes (`--prog-position centre`, the default).
+  My first version drew the progenitor at a random bin edge of the window and gave its angle to the network in
+  half of the examples; that stays as `--prog-position random` for a later step in which the position is
+  inferred or passed as a condition. The centre costs no simulations: the share of streams that cover a
+  24-bin track is 2.9 % centred against 2.5 % with a random position, because simulated streams extend about
+  equally on both sides of the progenitor.
+- **Windows without a hidden selection.** A mock track is a window of S bins with l bins left of the
+  progenitor, drawn from a fixed p0(S, l) and restricted to windows the simulated stream covers. Drawing every
+  simulation once per epoch would then favour simulated streams barely longer than the data, a factor the
+  paper's posterior does not have. Instead a simulation is drawn with probability proportional to Z, the
+  chance that a random window is covered (`SelectionDataset`); this is rejection sampling of p0, so the training
+  distribution is prior x p0 x 1[model covers the data].
+- **Track lengths.** p0(S) is set so that the lengths of the accepted examples are log-uniform between 6 and 64
+  bins: 41 % have 24 bins or more before the model-noise guard and 35 % after it (observed tracks: 44 %). With p0 itself log-uniform only 3 % of the examples
+  would have been that long, because few simulated streams are. S is observed, so this choice does not enter
+  the posterior; it decides where the training effort goes.
+- **Model-noise guard on, as in the paper.** Measured on 75,000 streams, with the guard off the largest ratio of
+  model noise to data error along a mock track has a median of 1.6 (90th percentile 16): half of the tracks
+  have a bin where the noise of the 30,000-particle model exceeds the data error. With the guard that ratio is
+  at most 0.33. The price is fewer simulations for long tracks: the streams behind examples of 24 bins or more
+  fall from 4,600 to 2,400 per 75,000. Because the comparable bins now depend on the data errors, simulations
+  are drawn per stratum of the error level (8 strata) and a weight in the loss corrects for the scatter of the
+  errors along the track; 89 % of the draws are used and the weights have an efficiency of 0.65 (0.29 before
+  the strata). `--var-ratio 0` switches the guard off; all weights are then exactly 1.
+- **Particle number against the paper.** The paper runs max(10,000, 1,500 per data point) particles, so its
+  guard is looser than ours for tracks longer than 20 points (69,000 particles for 46 points) and stricter for
+  shorter ones. The set has 30,000 for every stream; the guard is applied at that number.
+- **Errors and gaps.** sigma_data is drawn independently of the parameters: track level log-uniform in
+  0.1-5 kpc, log-normal scatter of 0.2-1.0 along the track (observed: medians 0.2-2.9 kpc, scatter 0.4-0.95).
+  30 % of mock tracks lose interior bins (10 of the 32 observed tracks have gaps of up to 3 bins).
+- **Usable simulations.** Dropped: failed integrations, streams that lost more than 1 % of their particles,
+  and streams with fewer than 6 comparable bins around the progenitor. Unbound progenitors stay (raw prior).
+  64.5 % of the first 50,000 streams are usable.
+
+### Summary network
+
+BayesFlow 2.1 offers `TimeSeriesTransformer`, `TimeSeriesNetwork` (convolutions + GRU), `SetTransformer`,
+`DeepSet`, `ConvolutionalNetwork` and fusion variants. Only the two transformers take a padding mask.
+`TimeSeriesTransformer` also takes an explicit time axis, which is the angle here, so missing bins and tracks
+of 7 to 49 bins need no special handling. It is the default. `timeseries` and `mlp` (a flattened track) are
+selectable for comparison; they see the observed flag as an input channel instead.
+
+First comparison, 2026-11-23: the first 200 shards (32,264 usable streams, 1,613 of them held out with 2 fixed
+mock tracks each), batch 256, 119 steps per epoch, 4 CPU cores per run, one seed, guard on, progenitor at a
+random position (the runs started before the centre became the default). The loss is in nats; 19.87 is a
+network that learnt nothing.
+
+| summary network | best held-out loss | at epoch | training loss there | held-out loss at the end | seconds per epoch |
+|---|---|---|---|---|---|
+| `transformer` | 16.78 | 5 of 6 | 14.56 | 16.82 | 187 |
+| `timeseries` | 17.12 | 5 of 16 | 14.86 | 18.41 | 62 |
+| `mlp` | 17.67 | 4 of 80 | 16.15 | 24.64 | 11 |
+
+The transformer reaches the lowest held-out loss and is the default. All three overfit on this subset: the
+training loss runs 2 nats or more below the held-out loss within a few epochs, and the MLP ends worse than a
+network that learnt nothing. The cause is the small set combined with drawing the few long streams many times
+per epoch. The full set has 16 times more streams; whether that is enough is the first thing to read off the
+`history.csv` of a full run. The ranking rests on one seed and 1,613 held-out streams.
+
+On CPU the transformer is the slow one: 0.6 steps per second at batch 256 on 4 cores, against 12 for the MLP.
+This machine has no GPU. A full epoch is about 610 steps at batch 512, so the transformer needs a GPU, or
+several hours per epoch here.
+
+### Checks (`train.py check`, 200 shards, default settings)
+
+All pass: latent transform round trip (relative error 2e-12); prior is N(0, 1) in every latent coordinate
+(KS, smallest p 0.009 of 13); q recovered from the orientation vector (1e-7); windows inside the covered run;
+every observed bin passes both guards; angles centred on the median; mock radii scatter with chi-square per
+point 1.0006; the real-track encoder reproduces the mock inputs under a sky rotation (4e-6); `log_likelihood`
+equals eq. 4 written by hand (3e-5); training batches have the shapes the estimator expects; streams are
+drawn in proportion to Z; the importance weights recover an analytic posterior mean; all 32 observed tracks
+encode on the 64-token grid and lie in the training range (spans 7-49 bins; PGC938075 with the paper's radius
+scaling of 100). The same checks pass with `--var-ratio 0` and with `--prog-position random`.
+
+Numbers the checks print: 17 % of the draws have no window and get weight 0 (weight efficiency 0.58);
+weighted share of examples with 24 bins or more 35 %, with 40 or more 16 %; the 1 % of streams with the
+largest Z give 24 % of the examples (each is drawn about 24 times per epoch, with new errors and noise each
+time); share of streams that cover a centred track of S bins: 21 % (8), 5.9 % (16), 2.9 % (24), 2.0 % (32),
+0.6 % (48), 0.2 % (64). For low-noise tracks of 12 bins or more the most likely progenitor offset is the true
+one in 95 % of cases. The augmentation takes 67 ms per batch of 512 on 4 CPU cores.
+
+Figure: `plots/train_v1/npe/mock_observations.png` (eight mock tracks with their model track, four observed
+tracks in the same frame).
+
+### Not done yet
+
+- No model has been trained on the full set; the runs above are smoke tests on 32,000 usable streams.
+- Simulations for long tracks are few (0.6 % of the streams cover 48 bins), and they are drawn
+  many times per epoch. The held-out loss is the guard against memorising them; whether 500,000 streams are
+  enough for the longest observed tracks is not known yet.
+- Importance sampling needs the tracks of posterior samples, which means running `generate.py` on given
+  parameters. `train.py sample` writes the samples and their log q; the simulation step is not written.
+- The progenitor sits on a bin edge of the stored tracks, so its offset is a multiple of 5 deg; tracks with an
+  odd number of points and the progenitor at the centre fall between two trained offsets.
+- The mock errors are independent between bins; real errors may be correlated along a track.
+
 ## Figures (`plots/`; the pilot's are in `plots/pilot/`)
 
 `prior_marginals`, `energy`, `binned_values`, `gallery` (PDF, 3 pages; `gallery_p1..3.png`), `noise_examples`,
