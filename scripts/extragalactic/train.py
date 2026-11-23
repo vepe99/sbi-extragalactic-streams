@@ -274,6 +274,18 @@ def flattening(vec: np.ndarray, q_lim=(0.5, 1.5)) -> np.ndarray:
     return q_lim[0] + (q_lim[1] - q_lim[0]) * u
 
 
+def orientation(vec: np.ndarray, q_lim=(0.5, 1.5)) -> np.ndarray:
+    """(dirx, diry, dirz) -> (q, cos_i, psi), the three columns the simulation set stores in `theta`.
+
+    The shards hold both: `c26_vec` = r(q) (-n_x, -n_y, n_z) with n = (sin i cos psi, sin i sin psi, cos i) the
+    symmetry axis of the halo (the sky-plane components are mirrored because of how StreaMAX builds its
+    rotation; see `c26_vector` in generate.py). The map is one to one, and psi is in [0, 2 pi).
+    """
+    v = np.asarray(vec, np.float64)
+    n = v / np.linalg.norm(v, axis=-1, keepdims=True) * np.array([-1.0, -1.0, 1.0])
+    return np.stack([flattening(v, q_lim), n[..., 2], np.mod(np.arctan2(n[..., 1], n[..., 0]), 2.0 * np.pi)], axis=-1)
+
+
 def to_streamax_fit(params: np.ndarray) -> np.ndarray:
     """Same 14 parameters with velocities in kpc/Gyr, the unit StreaMAX-fit passes to the simulator."""
     out = np.array(params, np.float64)
@@ -367,7 +379,8 @@ def load_simulations(cfg: Config) -> dict:
     design = window_design(cfg, count[keep], r_hw[keep], grid.i0)
     data = dict(zeta13=zeta13[keep], count=count[keep], r_med=r_med[keep], r_hw=r_hw[keep],
                 dissolved=raw["dissolved"][keep].astype(np.float32), z_strata=design["Z"].astype(np.float32))  # fmt: skip
-    return dict(data=data, index=raw["index"][keep], phys13=phys13[keep], q=th[keep, 2], zeta13_all=zeta13,
+    return dict(data=data, index=raw["index"][keep], phys13=phys13[keep], q=th[keep, 2], cos_i=th[keep, 3], psi=th[keep, 4],
+                zeta13_all=zeta13,
                 prior=prior, grid=grid, stats=stats, sim_config=sc, design=design)  # fmt: skip
 
 
@@ -869,6 +882,7 @@ def cmd_sample(cfg: Config) -> None:
     params = prior.from_latent(zeta)
     np.savez(run / f"posterior_{cfg.prog_mode}.npz", names=np.array([o["name"] for o in obs]), param_names=PARAM_NAMES,
              zeta=zeta.astype(np.float32), params=params.astype(np.float32), q=flattening(params[..., 2:5]).astype(np.float32),
+             q_cosi_psi=orientation(params[..., 2:5]).astype(np.float32),
              log_q=log_q.reshape(len(obs), cfg.n_samples).astype(np.float32),
              in_support=np.array([e["in_support"] for e in enc]), r_scale=np.array([o["r_scale"] for o in obs]))  # fmt: skip
     for o, e, p in zip(obs, enc, params):
@@ -905,8 +919,11 @@ def cmd_check(cfg: Config) -> None:
     sig = np.linspace(0.01, cfg.sig_sys_max - 0.01, 7)[:, None]
     check("sigma_sys transform round trip",
           np.allclose(prior.from_latent(prior.to_latent(sig, cols=[I_SIG]), cols=[I_SIG]), sig, rtol=1e-6))
-    dq = np.abs(flattening(sims["phys13"][:, 2:5], sims["sim_config"]["q"]) - sims["q"]).max()
-    check("flattening recovered from the orientation vector", dq < 2e-3, max_abs_err=f"{dq:.1e}")
+    back3 = orientation(sims["phys13"][:, 2:5], sims["sim_config"]["q"])
+    dq, dc = np.abs(back3[:, 0] - sims["q"]).max(), np.abs(back3[:, 1] - sims["cos_i"]).max()
+    dpsi = np.abs(np.angle(np.exp(1j * (back3[:, 2] - sims["psi"])))).max()
+    check("q, cos_i and psi recovered from the orientation vector", max(dq, dc, dpsi) < 1e-4,
+          max_abs_err=f"q {dq:.1e}, cos_i {dc:.1e}, psi {dpsi:.1e} rad")  # fmt: skip
 
     # --- mock observations
     n = 20000
