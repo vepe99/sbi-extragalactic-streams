@@ -23,7 +23,9 @@ dataset is the starting point for testing whether an amortized posterior estimat
 - `outputs/extragalactic/C26_test/README.md`: data schema
 - `outputs/extragalactic/C26_test/report.md`: what was tested and run, and every StreaMAX detail looked up
 
-Generated data (`outputs/**/data/`) and figures (`outputs/**/plots/`) are not tracked.
+Generated data (`outputs/**/data/`) and figures (`outputs/**/plots/`) are not tracked. On disk since
+2026-11-23: `data/c26_100k/` (the 100,000-stream set, merged into one file; read it with `--subdir c26_100k`),
+`data/train_v1/` (the 500,000-stream training set), `data/strrings/` and `data/tests/`.
 
 ## Decisions
 
@@ -96,7 +98,7 @@ the analysis and training code that will follow: `uv sync`, then `uv run python 
 CUDA 12 wheels. The five commands above do not use it; they run from the script headers.
 
 ```bash
-uv run python analysis/inspect_prior.py    # plots/prior_inspection/ + data/prior_inspection.json
+uv run python analysis/inspect_prior.py --subdir c26_100k   # plots/c26_100k/prior_inspection/ + data/c26_100k/prior_inspection.json
 ```
 
 ## Amortised inference

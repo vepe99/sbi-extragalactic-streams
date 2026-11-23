@@ -538,14 +538,25 @@ Deleted, 906 MB in all; `train_v1/` was running and was not touched:
 | `particles_0000[0-4].h5` in `data/` | particles of the first 5,000 streams of the 100,000 set | galleries in `plots/` |
 | `particles_*.h5` in `pilot/` and `galax_pilot/` | particles of those two sets | galleries in `plots/pilot/` and `plots/galax_pilot/` |
 
-Kept: the 100 shards of the 100,000-stream set with `analysis.h5`, its manifest, logs and tables (112 MB);
-the tracks and summaries of `pilot/` and `galax_pilot/`; `tests/` (the step-4 test report and the StreaMAX
-comparison); `strrings/`; `train_v1/`.
+Second round, same day, also asked by the user:
 
-Consequences: `analysis/convergence.py` and the particle galleries of `plot.py` and `analysis/inspect_prior.py`
-cannot be redrawn for these sets, and their `manifest.json` still names the particle files. Every stream
-depends only on the seed and its index, so each set can be regenerated with the settings in the tables above
-(the 100,000 set took 435 s on 100 cores).
+- **The 100,000-stream set is now one file in its own folder**, `data/c26_100k/shard_all.h5` (98 MB), with
+  `analysis.h5`, `manifest.json`, the summary table, `prior_inspection.json` and `logs/` next to it. The file
+  has the schema of a shard, so `plot.py`, `generate.py analyze` and the analysis scripts read it with
+  `--subdir c26_100k`. The merge was checked dataset by dataset against the 100 shards (38 datasets, equal
+  values and types) before they were deleted. The per-shard timings are kept in the attribute `meta_shards`
+  and in `original_shards` of the manifest.
+- **`pilot/` and `galax_pilot/` deleted.** The pilot's numbers are in "Timings" and "Reproducibility" above;
+  the galax set's in "The galax set used for the galleries and the prior inspection", with its figures in
+  `plots/galax_pilot/`. `train_v1` replaces both as the galax set.
+
+Left in `data/`: `c26_100k/` (113 MB), `train_v1/`, `strrings/`, `tests/` (the step-4 test report and the
+StreaMAX comparison) and `convergence.json`.
+
+Consequences: `analysis/convergence.py` and the particle galleries cannot be redrawn for the deleted sets, and
+the existing figures of the 100,000 set stay in `plots/` while new ones made with `--subdir c26_100k` go to
+`plots/c26_100k/`. Every stream depends only on the seed and its index, so each set can be regenerated with
+the settings in the tables above (the 100,000 set took 435 s on 100 cores).
 
 ## Figures (`plots/`; the pilot's are in `plots/pilot/`)
 

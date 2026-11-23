@@ -15,6 +15,13 @@ uv run --script scripts/extragalactic/plot.py               # plots/*.pdf, *.png
 Every `Config` field in `generate.py` is a command-line option (`--progenitor-mass-loss linear`, `--n-steps 99`,
 `--gpus <uuid,uuid>`, `--cpu`, ...).
 
+> **State of `data/` since 2026-11-23.** The 100,000-stream set described here was merged into one file and
+> moved to `data/c26_100k/` (`shard_all.h5`, same schema as a shard, with `analysis.h5`, `manifest.json`, the
+> summary table, `prior_inspection.json` and `logs/`). Read it with `--subdir c26_100k`. Its particle files,
+> the `pilot/` and `galax_pilot/` sets and the `conv_*` / `test_d5_*` test sets were deleted; their findings
+> are in `report.md`. The 500,000-stream training set is `data/train_v1/`. The commands below still write a
+> new set to `data/` if run again.
+
 ## Layout
 
 ```

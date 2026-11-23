@@ -2,8 +2,6 @@
 outputs/**/data/
 outputs/**/plots/
 
-# the hand-over archive the repo was created from
-c26_export.tgz
 
 # run logs, environments, caches
 run.log
