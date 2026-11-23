@@ -490,8 +490,8 @@ per epoch. The full set has 16 times more streams; whether that is enough is the
 `history.csv` of a full run. The ranking rests on one seed and 1,613 held-out streams.
 
 On CPU the transformer is the slow one: 0.6 steps per second at batch 256 on 4 cores, against 12 for the MLP.
-This machine has no GPU. A full epoch is about 610 steps at batch 512, so the transformer needs a GPU, or
-several hours per epoch here.
+This machine has no GPU. A full epoch is about 610 steps at batch 512, which at the measured rate is about
+half an hour for the transformer on 4 cores (not measured on more cores) and under two minutes for the MLP.
 
 ### Checks (`train.py check`, 200 shards, default settings)
 
