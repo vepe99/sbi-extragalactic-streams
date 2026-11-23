@@ -392,7 +392,80 @@ the Dopri8 ones to well under 1 % (same particle draws). 99 or 399 path samples 
 no difference. The user first asked for a cap of 400 and chose 2,500 on these numbers.
 
 Expected: about 12 hours for 500,000 streams (4.9 million core-seconds on 112 cores), 1.5 GB of tracks and
-3.6 GB of particles. *Results, timings and the prior predictive checks are added when the run is complete.*
+3.6 GB of particles. Measured values follow.
+
+### Results (run complete 2026-11-23 11:07; analysed the same day)
+
+| quantity | value |
+|---|---|
+| streams, shards | 500,000 in 2,000 shards; `manifest.json` complete, no failed worker |
+| wall time | 13.7 h on 112 single-core workers (estimate: 12 h) |
+| cost | 10.5 core-seconds per stream (shard wall time: median 2,597 s, 1,872 to 3,827 s) |
+| disk | 4.5 GB: 1.1 GB of tracks, 3.4 GB of particles for the first 10,000 streams |
+| failed streams (step cap) | 0.22 % of all; 0.34 % of the bound; 0.90 % of the bound with x0 < 70 kpc; 1.15 % of the bound with 6 or more pericentres |
+| streams that lost more than 1 % of their particles | 0.47 % of all; 0.72 % of the bound; 1.86 % of the bound with x0 < 70 kpc; 2.43 % with 6 or more pericentres |
+| dissolved progenitor (`prog/dissolved`) | 49.99 % |
+| solver steps per particle (stream mean) | median 20, 90th percentile 229, 99th percentile 854; 0.57 % of streams have a particle at the cap |
+| energy error of the progenitor orbit | 99.9th percentile 1.2e-4; no stream above 1 % to two decimals of a per cent |
+
+Step-7 table (`data/train_v1/summary_table.md`, valid bin = at least 300 of 30,000 particles, C26 ordering):
+
+| fraction of streams | all (n = 500000) | bound only (n = 323745) |
+|---|---|---|
+| unbound (E >= 0) | 35.03 % | 0.00 % |
+| bound, no completed radial orbit in t_int | 21.10 % | 32.58 % |
+| failed / NaN | 0.22 % | 0.00 % |
+| at least one valid bin | 99.78 % | 99.99 % |
+| angular length > 90 deg | 24.18 % | 22.69 % |
+| arc length > 100 kpc | 32.80 % | 26.85 % |
+| valid radii in [10, 500] kpc | 92.10 % | 90.92 % |
+| all three cuts | 13.80 % | 11.07 % |
+
+Other flags (all streams): any non-finite particle 0.57 % (mean particle fraction 0.25 %), tidal radius undefined at some epoch 0.22 %, particles outside the phi grid 9.15 %, projected progenitor angle not monotonic 20.72 %, all three cuts and contiguous valid bins 7.86 %.
+
+Of the streams passing all three cuts, 48.05 % are unbound. Progenitor orbit not resolved by 99 leapfrog steps (relative energy error > 1 %): 0.00 % of all, 0.00 % of the bound, 0.00 % of those passing the cuts.
+
+| log10 M_halo | 11.0-11.5 | 11.5-12.0 | 12.0-12.5 | 12.5-13.0 | 13.0-13.5 | 13.5-14.0 |
+|---|---|---|---|---|---|---|
+| unbound | 93.63 % | 75.16 % | 35.53 % | 5.42 % | 0.10 % | 0.00 % |
+
+| speed today [km/s] | 0-100 | 100-200 | 200-300 | 300-400 | 400-500 | 500-700 | >700 |
+|---|---|---|---|---|---|---|---|
+| unbound | 0.56 % | 11.10 % | 24.45 % | 34.02 % | 40.84 % | 48.48 % | 57.63 % |
+
+Against the 100,000-stream leapfrog set: the unbound share is the same (35.0 %), and 13.8 % pass all three cuts
+instead of 23.5 %. The difference is the one measured on the pilot sets: the mixed progenitor state and the
+resolved orbits. The line on leapfrog steps in the table is generated text of the 99-step set; here it reads
+0 % because the adaptive integrator resolves the orbit.
+
+### Prior predictive checks against the 32 STRRINGS tracks (full set, C26 ordering)
+
+`scripts/extragalactic/prior_predictive.py --subdir train_v1`; 497,673 streams usable (not failed, not lossy).
+Figures in `plots/train_v1/prior_predictive/`, numbers in `data/train_v1/prior_predictive.json`.
+
+- **Coverage.** Every track has at least 248 covering simulations (median 7,040). The count falls with length:
+  160,000 for the 7-point track, 1,100 to 2,000 for 24 to 28 points, 250 to 800 for 33 points and more.
+- **Bands.** 30 of 32 tracks lie entirely inside the 95 % band of the simulated radii on their bins. The
+  exceptions are PGC938075 (entirely below, radii under 1 kpc) and NGC4256 (93 % of its bins inside).
+- **Summaries.** Outside the central 95 % of the simulations: mean radius 1 track, contrast 3, slope 3,
+  curvature 4, in 10 tracks in all (6 would be expected by chance). The curvature quantile is above 0.9 for
+  eight tracks, seven of them with 25 points or more (IC0120, IC1657, NGC4256, NGC5263, PGC000902, PGC1092512,
+  UGC01424) and PGC938075: the long observed tracks bend more than the simulated ones.
+- **Joint tests over all bins.** Mahalanobis distance: 5 of 32 beyond 95 % (NGC4256, NGC5263, PGC938075,
+  PGC1001085, UGC08717). Shape only: 1 (UGC08717). Distance to the nearest simulation: 5 (PGC006791, UGC01424,
+  NGC4256, PGC938075, UGC08717). About 1.6 per test would be expected by chance; the outliers are the longest
+  tracks and PGC938075.
+- **Close matches.** 10 of 32 tracks have a simulation within 10 % rms and 23 within 20 %. Counts within 10 %:
+  NGC2769 282, NGC3041 200, NGC4686 180, ESO079-003 82, ESO298-016 67, NGC5055 9, NGC4632 7, PGC006791 5,
+  NGC4388 3, PGC3092153 2; 837 in all, 581 with a surviving progenitor and 256 dissolved. No track with 15
+  points or more has one; their best match is 11 % to 35 % rms (PGC1092512 and NGC1162 at 11 %, NGC5263 at
+  35 %, UGC08717 at 32 %).
+- **Reading.** The prior covers the short and medium tracks well. For the tracks of 25 points and more it
+  contains them bin by bin but not as a whole shape: few simulations, none close, and the observed curvature
+  is at the edge of what is simulated. Those are the tracks the paper finds most informative.
+
+The standard figures (`plots/train_v1/`) and the prior inspection (`plots/train_v1/prior_inspection/`,
+`data/train_v1/prior_inspection.json`) were redrawn on the full set.
 
 ## Inference pipeline `scripts/extragalactic/train.py` (2026-11-23, written while `train_v1` was running)
 
