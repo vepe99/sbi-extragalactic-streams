@@ -526,6 +526,27 @@ tracks in the same frame).
   odd number of points and the progenitor at the centre fall between two trained offsets.
 - The mock errors are independent between bins; real errors may be correlated along a track.
 
+## Clean-up of `data/` (2026-11-23, asked by the user)
+
+Deleted, 906 MB in all; `train_v1/` was running and was not touched:
+
+| removed | what it was | where its findings are |
+|---|---|---|
+| `conv_p10`, `conv_p30`, `conv_p50`, `conv_s399`, `conv_s399b`, `conv_s1999` | particle and step tests, 1,920-3,840 streams each | "Particles, steps and progenitor state" above, `data/convergence.json`, `plots/convergence/convergence.png` |
+| `conv_galax` | galax integrator against the leapfrog, 1,920 streams | "galax's adaptive integrator against the leapfrog" above, `plots/convergence/galax_integrator.png` |
+| `test_d5_n99`, `test_d5_cap1000`, `test_d5_cap2500` | Dopri5 step-cap tests, 960 streams each | the step-cap table in the `train_v1` section |
+| `particles_0000[0-4].h5` in `data/` | particles of the first 5,000 streams of the 100,000 set | galleries in `plots/` |
+| `particles_*.h5` in `pilot/` and `galax_pilot/` | particles of those two sets | galleries in `plots/pilot/` and `plots/galax_pilot/` |
+
+Kept: the 100 shards of the 100,000-stream set with `analysis.h5`, its manifest, logs and tables (112 MB);
+the tracks and summaries of `pilot/` and `galax_pilot/`; `tests/` (the step-4 test report and the StreaMAX
+comparison); `strrings/`; `train_v1/`.
+
+Consequences: `analysis/convergence.py` and the particle galleries of `plot.py` and `analysis/inspect_prior.py`
+cannot be redrawn for these sets, and their `manifest.json` still names the particle files. Every stream
+depends only on the seed and its index, so each set can be regenerated with the settings in the tables above
+(the 100,000 set took 435 s on 100 cores).
+
 ## Figures (`plots/`; the pilot's are in `plots/pilot/`)
 
 `prior_marginals`, `energy`, `binned_values`, `gallery` (PDF, 3 pages; `gallery_p1..3.png`), `noise_examples`,

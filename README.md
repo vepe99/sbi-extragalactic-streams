@@ -17,8 +17,9 @@ dataset is the starting point for testing whether an amortized posterior estimat
   cuts do to the prior, where the integrator fails, the prior predictive against the STRRINGS streams)
 - `analysis/prior_predictive.py`: prior predictive checks of a set (finished or partial) against the observed
   STRRINGS tracks
-- `analysis/convergence.py`: how many particles and leapfrog steps a training set needs (reads the `conv_*` test
-  sets)
+- `analysis/convergence.py`: how many particles and leapfrog steps a training set needs. It reads the `conv_*`
+  test sets, which were deleted on 2026-11-23; its figures and `data/convergence.json` are kept, and the report
+  lists the settings to regenerate the sets
 - `outputs/extragalactic/C26_test/README.md`: data schema
 - `outputs/extragalactic/C26_test/report.md`: what was tested and run, and every StreaMAX detail looked up
 

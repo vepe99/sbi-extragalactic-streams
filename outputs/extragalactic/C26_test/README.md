@@ -22,6 +22,7 @@ data/
   manifest.json            config, versions, shard list (file, start, stop, n, wall_s, device), run timing
   shard_00000.h5 ...       1,000 streams each; stream index k lives in shard k // 1000
   particles_00000.h5 ...   projected particles of the first 5,000 streams (shards 0-4)
+                           (deleted 2026-11-23 for the 100,000 set, `pilot/` and `galax_pilot/`; kept in `train_v1/`)
   analysis.h5              one row per stream: everything below except track/ (written by `analyze`)
   summary_table.md/.json   the step-7 table
   logs/worker_*.log        one JSON line per event (probe, shard, end)
