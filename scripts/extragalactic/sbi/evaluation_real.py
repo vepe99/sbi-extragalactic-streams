@@ -9,7 +9,14 @@ Written to <run>/evaluation_real/.
   q.png            halo flattening per track: median and 16-84 % of the network's posterior and, if importance
                    weights were computed, of the weighted draws
   ppc_p*.png       posterior predictive check per track (predictive.py): `ppc_draws` posterior draws are
-                   simulated again with generate.py and compared with the observed track
+                   simulated again with generate.py (on GPUs unless `sim_device: cpu`) and compared with the
+                   observed track. Blue: the network's posterior; orange: the same draws importance weighted
+  sky_p*.png       the same check in the plane of the track files (x, y in kpc, host at the origin), with the
+                   progenitor position of every covering draw. sky.py redraws it from the files of a finished
+                   evaluation, without simulating
+  corner_<track>.png  corner plot of the posterior (corner.py): regions of the network's draws and of the
+                   importance-weighted simulated draws, and the prior, with the predictive check in the upper
+                   right corner. `ppc_draws` = `n_samples` weights every draw
   weights.npz      the simulated draws, their importance weights and which of them cover the track
   metrics.json     per track: q percentiles, share of covering draws, predictive p-value, importance-sampling
                    efficiency, effective sample size and log evidence
@@ -23,11 +30,13 @@ treats a stream without a visible progenitor: mass ramped to zero, and the proge
 from __future__ import annotations
 
 import json
+import os
 
 from config import parse, trained
 
 cfg = parse()  # selects the device: must come before jax / keras are imported
 RUN = trained(cfg)
+os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")  # leave room on the card for the simulations
 
 import keras  # noqa: E402
 import numpy as np  # noqa: E402
@@ -35,9 +44,10 @@ import numpy as np  # noqa: E402
 import networks  # noqa: E402,F401  registers the custom summary network for loading
 from data import PARAM_NAMES, load_observed, load_simulations, orientation  # noqa: E402
 from mock import encode_observation  # noqa: E402
-from predictive import draws, plt, predictive  # noqa: E402
+from corner import corner, physical15  # noqa: E402
+from predictive import draws, plt, ppc_panel, predictive, sky_pages  # noqa: E402
 
-OUT = RUN / "evaluation_real"
+OUT = RUN / ("evaluation_real" + (f"_{cfg.sim_integrator}" if cfg.sim_integrator else ""))
 
 
 def weighted_percentiles(x, w, q=(16, 50, 84)) -> list:
@@ -59,7 +69,7 @@ def main() -> None:
     if not observed:
         raise SystemExit(f"no observed track matches {wanted}")
     tracks = [encode_observation(o["theta_deg"], o["r"], o["r_err"], cfg, grid, dissolved=True, prog=0.5 if cfg.prog_given else None)
-              | dict(title=o["name"]) for o in observed]  # fmt: skip
+              | dict(title=o["name"], angle0=float(np.median(o["theta_deg"]))) for o in observed]  # fmt: skip
 
     zeta = draws(est, tracks, cfg.n_samples, cfg, OUT)
     par = prior.from_latent(zeta)
@@ -68,13 +78,22 @@ def main() -> None:
              params=par.astype(np.float32), q=o3[..., 0].astype(np.float32), q_cosi_psi=o3.astype(np.float32))  # fmt: skip
     rows = [dict(track=t["title"], points=int(t["mask"].sum()), q=np.percentile(q, [16, 50, 84]).tolist()) for t, q in zip(tracks, o3[..., 0])]
 
+    sim = None
     if cfg.ppc_draws > 0:
-        for row, extra in zip(rows, predictive(est, tracks, zeta, prior, grid, sims["sim_config"], cfg, OUT)):
-            row |= extra
-        w = np.load(OUT / "weights.npz")["weights"]
-        for row, wi, q in zip(rows, w, o3[:, : cfg.ppc_draws, 0]):
+        extra, sim = predictive(est, tracks, zeta, prior, grid, sims["sim_config"], cfg, OUT)
+        for row, e in zip(rows, extra):
+            row |= e
+        sky_pages(tracks, sim, par[:, : cfg.ppc_draws], rows, grid, OUT)
+        for row, wi, q in zip(rows, sim["weights"], o3[:, : cfg.ppc_draws, 0]):
             if np.isfinite(wi).all() and wi.sum() > 0:
                 row["q_weighted"] = weighted_percentiles(q, wi)
+
+    phys, M = physical15(par), cfg.ppc_draws
+    prior_phys = physical15(prior.from_latent(np.random.default_rng(cfg.seed).standard_normal((20000, len(PARAM_NAMES)))))
+    for i, (t, row) in enumerate(zip(tracks, rows)):
+        corner(phys[i], prior_phys, OUT / f"corner_{t['title']}.png", f"{t['title']}: {row['points']} points",
+               weighted=(phys[i, :M], sim["weights"][i]) if sim else None,
+               ppc=(lambda ax, i=i, t=t, row=row: ppc_panel(ax, t, sim["rep"][i], sim["m"][i], sim["cover"][i], row, legend=True, fontsize=10, w=sim["weights"][i], var=sim["var"][i])) if sim else None)  # fmt: skip
 
     y = np.arange(len(rows))
     fig, ax = plt.subplots(figsize=(5.5, 1.5 + 0.22 * len(rows)), constrained_layout=True)

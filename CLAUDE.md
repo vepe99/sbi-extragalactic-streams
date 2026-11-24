@@ -58,3 +58,21 @@ Both `autocvd` and `gpustat` are in `pyproject.toml`.
 
 - One YAML file drives training and both evaluations: `outputs/extragalactic/C26_test/npe_v2.yaml`.
   See `scripts/extragalactic/sbi/README.md`.
+- Training speed (measured 2026-11-23, table in that README): the step time is the summary transformer's and
+  grows with `embed_dim` and `n_blocks`, not with `n_heads`; the coupling flow costs 13 ms of a step. The
+  training set is held on the GPU (`data_on_device: true`); `train.py` then lets JAX take 95 % of the card.
+- **Decision (Giuseppe, 2026-11-23): a very small transformer summary, for quick training**
+  (`embed_dim` 64, `n_blocks` 2, `n_heads` 4 in the YAML; the sizes are Claude's pick, not yet run).
+
+### Nested sampling of an observed track (`scripts/extragalactic/sbi/nested.py`, written 2026-11-24)
+
+- dynesty's dynamic nested sampling of the posterior the importance weights aim at. Sampler settings (`ns_*`)
+  default to StreaMAX-fit's "paper" preset: 2000 live points, `rslice`, 10,000 effective samples. Results in
+  `outputs/extragalactic/C26_test/nested/<track>/`.
+- `generate.py` cannot be imported in the project environment: its own uv environment has galax from git
+  (`4c29842`), the project pins `galax==0.1.0`, which has no `galax.orbits`. `nested.py` therefore starts its
+  GPU workers with the interpreter of that environment (`uv python find --script scripts/extragalactic/generate.py`).
+  The comment in `pyproject.toml` that calls the two sets of pins the same is wrong on this point.
+- Speed on compgpu6 (RTX 2080 Ti, 30,000 particles, 64-bit): 75 streams per second and card at any batch size.
+- The likelihood is noisy in the random key of the particle release: 0.8 in log-likelihood (standard deviation
+  over 802 posterior draws of NGC1162). `nested.py` uses one key for every call.

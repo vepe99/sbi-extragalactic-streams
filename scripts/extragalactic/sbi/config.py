@@ -16,7 +16,11 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import os
+import re
 import shutil
+import subprocess
+import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -67,6 +71,10 @@ class Config:
     n_blocks: int = 3
     n_heads: int = 4
     dropout: float = 0.05
+    # BayesFlow's standardisation (running mean and sd per feature, learnt during training and stored in the
+    # model): none | all | a comma-separated list of inference_variables (the parameters), summary_variables
+    # (the tokens; moments over the observed bins only), inference_conditions
+    standardize: str = "none"
     # --- training (train.py)
     name: str = "npe_v2"
     epochs: int = 100
@@ -74,6 +82,12 @@ class Config:
     lr: float = 5e-4
     seed: int = 2607
     cpu: bool = False  # stay off the GPUs
+    # hold the training set on the device that trains (1.0 GB per million usable streams at span_max 49) and
+    # make the batches there; train.py then lets JAX take 95 % of the card. false = on the host: the same
+    # batches, 17 ms a step slower at batch 4096. Use false when the run stops with RESOURCE_EXHAUSTED: the set
+    # and the training step do not fit together (the step of embed_dim 256, n_blocks 6 takes 26.9 GiB at batch
+    # 4096, so a 40 GB card holds it with a set of up to about 10 GiB)
+    data_on_device: bool = True
     # --- evaluation (evaluation.py: mock tracks of held-out streams; evaluation_real.py: observed tracks)
     n_test: int = 1000  # mock tracks for recovery, calibration and contraction
     n_samples: int = 1000  # posterior draws per track
@@ -82,8 +96,29 @@ class Config:
     ppc_draws: int = 64  # posterior draws per track that are simulated again (predictive check, importance weights)
     real_tracks: str = ""  # observed tracks to evaluate, comma separated (e.g. NGC5907,NGC1162); "" = all 32
     importance: bool = True  # importance weights of the simulated draws towards prior x likelihood of the paper
-    sim_workers: int = 16  # CPU worker processes generate.py uses for those simulations (about 10 core-seconds each)
-    sim_cores: str = ""  # cores to pin them to, e.g. 0-15; "" = no pinning
+    # where generate.py simulates them: gpu = the card this evaluation holds plus the cards free at that moment
+    # (at most sim_workers of them) | cpu = sim_workers processes. A CPU evaluation (`cpu: true`, or no NVIDIA
+    # driver) always simulates on the CPU
+    sim_device: str = "gpu"
+    # integrator of those simulations: "" = that of the training set | leapfrog | galax. The adaptive galax
+    # integrator takes about 10 s per stream on a CPU core and is unusable on a GPU (no stream finished in
+    # 280 s on a 2080 Ti); the leapfrog (StreaMAX's own, the paper's) runs tens of streams per second on a GPU.
+    # With an integrator named here the results go to evaluation*_<integrator>/, next to the default ones
+    sim_integrator: str = ""
+    sim_batch: int = 0  # gpu: streams per batch; 0 = the simulator's choice (1 for galax, a memory probe for leapfrog)
+    sim_workers: int = 16
+    sim_cores: str = ""  # cpu: cores to pin the processes to, e.g. 0-15; "" = no pinning
+    # --- nested.py: dynamic nested sampling (dynesty) of the observed tracks in `real_tracks`, the simulator on
+    # GPUs. Sampler defaults = the "paper" preset of StreaMAX-fit: 2000 live points, random-slice sampling,
+    # 10,000 effective samples
+    ns_gpus: int = 4  # free GPUs to use, one process each (a CPU run uses one CPU process)
+    ns_batch: int = 128  # streams simulated at once on a GPU; dynesty proposes ns_gpus x ns_batch points at a time
+    ns_nlive: int = 2000  # live points of the baseline run and of every batch added to it
+    ns_sample: str = "rslice"  # dynesty's sampler inside the bounds: rslice | slice | rwalk | unif | auto
+    ns_neff: int = 10000  # stop when the posterior has this many effective samples
+    ns_dlogz: float = 0.01  # the baseline run stops when the evidence left in the live points is below this
+    ns_maxcall: int = 0  # stop after this many likelihood calls: for a test, such a run is not converged. 0 = no limit
+    ns_tag: str = ""  # results go to <out>/nested/<track>[_<tag>]/
 
     def data_dir(self) -> Path:
         return REPO / self.out / "data" / self.subdir
@@ -108,7 +143,8 @@ class Config:
 
 
 EVALUATION_FIELDS = ("n_test", "n_samples", "prog_given", "ppc_tracks", "ppc_draws", "real_tracks", "importance",
-                     "sim_workers", "sim_cores", "cpu")  # fmt: skip
+                     "sim_device", "sim_integrator", "sim_batch", "sim_workers", "sim_cores", "cpu", "data_on_device",
+                     "ns_gpus", "ns_batch", "ns_nlive", "ns_sample", "ns_neff", "ns_dlogz", "ns_maxcall", "ns_tag")  # fmt: skip
 
 
 def parse() -> Config:
@@ -143,8 +179,8 @@ def trained(cfg: Config) -> Path:
 
 
 def pick_device(cpu: bool) -> str:
-    """CPU if asked or if the machine has no NVIDIA driver; otherwise one FREE GPU, chosen by autocvd (it waits
-    for one and sets CUDA_VISIBLE_DEVICES). Under Slurm the allocation is used as given."""
+    """CPU if asked or if the machine has no NVIDIA driver; otherwise one FREE GPU (`free_gpu` waits for one and
+    sets CUDA_VISIBLE_DEVICES). Under Slurm the allocation is used as given."""
     os.environ.setdefault("KERAS_BACKEND", "jax")
     if cpu or shutil.which("nvidia-smi") is None:
         os.environ["JAX_PLATFORMS"] = "cpu"
@@ -152,6 +188,44 @@ def pick_device(cpu: bool) -> str:
         return "cpu" + ("" if cpu else " (no NVIDIA driver)")
     if os.environ.get("SLURM_JOB_ID") and os.environ.get("CUDA_VISIBLE_DEVICES"):
         return f"gpu {os.environ['CUDA_VISIBLE_DEVICES']} (Slurm)"
-    from autocvd import autocvd
+    return f"gpu {free_gpu()} (free)"
 
-    return f"gpu {autocvd(num_gpus=1)} (autocvd)"
+
+def free_gpus() -> list[tuple[str, str]]:
+    """(nvidia-smi index, UUID) of every GPU that is free right now, by autocvd's own test `gpu_is_free` (= no
+    compute process on the card).
+
+    `autocvd(num_gpus=1)` cannot be used on a machine with a broken card (compgpu6 has one): it counts the cards
+    with `nvidia-smi -L`, which then exits with an error. So the cards are listed with a query that survives
+    the broken one. Same method as `free_gpus` in scripts/extragalactic/generate.py."""
+    from autocvd.nvidia_smi_calls import gpu_is_free
+
+    out = subprocess.run(["nvidia-smi", "--query-gpu=index,uuid", "--format=csv,noheader"],
+                         capture_output=True, text=True).stdout  # fmt: skip
+    rows = [m.groups() for m in (re.match(r"\s*(\d+),\s*(GPU-\S+)", ln) for ln in out.splitlines()) if m]
+    if not rows:
+        raise SystemExit("nvidia-smi lists no usable GPU; pass --cpu for a CPU run")
+    free = []
+    for idx, uuid in rows:
+        try:
+            if gpu_is_free(int(idx)):
+                free.append((idx, uuid))
+        except subprocess.CalledProcessError:  # a card nvidia-smi cannot query is not usable
+            pass
+    return free
+
+
+def free_gpu(interval: int = 30) -> str:
+    """Wait for a free GPU, point CUDA_VISIBLE_DEVICES at it and return its nvidia-smi index: the free card with
+    the highest index, as autocvd does. The card is addressed by UUID because a broken card shifts the CUDA
+    indices relative to nvidia-smi's."""
+    start = time.time()
+    while True:
+        free = free_gpus()
+        if free:
+            idx, uuid = free[-1]
+            os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+            os.environ["CUDA_VISIBLE_DEVICES"] = uuid
+            return idx
+        print(f"no free GPU, waiting ({int(time.time() - start)} s)", file=sys.stderr, end="\r")
+        time.sleep(interval)

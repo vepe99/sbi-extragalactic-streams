@@ -30,6 +30,7 @@ dependencies = [
     "StreaMAX @ git+https://github.com/David-Chemaly/StreaMAX.git@9fd520ea2904b617c701e1ee5b8740a9a0fd148e",
     "pyyaml==6.0.3",  # config.yaml of an SBI run
     "bayesflow==2.1.0",  # amortised inference (scripts/extragalactic/train.py); keras 3 with the jax backend
+    "dynesty==3.2.0",  # dynamic nested sampling of one observed track (scripts/extragalactic/sbi/nested.py), the sampler of 2026b
 ]
 
 [project.optional-dependencies]

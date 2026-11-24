@@ -10,17 +10,21 @@
                            efficiency (predictive.py); posterior draws are simulated again with generate.py
   metrics.json             the numbers behind the figures
 
-Settings (config.py): n_test, n_samples, ppc_tracks, ppc_draws, importance, sim_workers, sim_cores, prog_given.
+Settings (config.py): n_test, n_samples, ppc_tracks, ppc_draws, importance, sim_device, sim_integrator, sim_batch, sim_workers,
+sim_cores, prog_given.
 """
 
 from __future__ import annotations
 
 import json
 
+import os
+
 from config import parse, trained
 
 cfg = parse()  # selects the device: must come before jax / keras are imported
 RUN = trained(cfg)
+os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")  # leave room on the card for the simulations
 
 import bayesflow as bf  # noqa: E402
 import keras  # noqa: E402
@@ -31,14 +35,14 @@ from data import I_PROG, PARAM_NAMES, load_simulations, orientation, split  # no
 from mock import fixed_observations  # noqa: E402
 from predictive import draws, plt, predictive  # noqa: E402
 
-OUT = RUN / "evaluation"
+OUT = RUN / ("evaluation" + (f"_{cfg.sim_integrator}" if cfg.sim_integrator else ""))
 
 
 def loss_curve() -> dict:
     """history.csv -> loss.png. For a coupling flow the loss is in nats and the dashed line is a network that
     learnt nothing (the entropy of the prior over the inferred parameters)."""
     h = np.atleast_2d(np.genfromtxt(RUN / "history.csv", delimiter=",", skip_header=1))
-    best = int(np.argmin(h[:, 2]))
+    best = int(np.flatnonzero(h[:, 4])[-1])  # the last epoch that was saved
     fig, ax = plt.subplots(figsize=(6, 3.8), constrained_layout=True)
     ax.plot(h[:, 0], h[:, 1], color="#08306b", lw=1.5, label="training")
     ax.plot(h[:, 0], h[:, 2], color="#c05621", lw=1.5, label="held out")
@@ -101,7 +105,7 @@ def main() -> None:
     metrics = dict(loss=loss_curve(), classical=classical(zeta, test, prior))
     if cfg.ppc_tracks > 0:
         k = cfg.ppc_tracks
-        metrics["ppc"] = predictive(est, tracks[:k], zeta[:k], prior, grid, sims["sim_config"], cfg, OUT)
+        metrics["ppc"] = predictive(est, tracks[:k], zeta[:k], prior, grid, sims["sim_config"], cfg, OUT)[0]
     (OUT / "metrics.json").write_text(json.dumps(metrics, indent=1))
     print(f"wrote {OUT}: " + ", ".join(sorted(p.name for p in OUT.iterdir())))
 

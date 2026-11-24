@@ -1,0 +1,21 @@
+{
+ "track": "NGC1162",
+ "points": 28,
+ "subdir": "train_v2",
+ "ordering": "c26",
+ "n_min": 10,
+ "var_ratio": 4.0,
+ "sig_sys_max": 5.0,
+ "span_max": 49,
+ "seed": 2607,
+ "nlive": 2000,
+ "sample": "rslice",
+ "queue_size": 512,
+ "simulator": {
+  "integrator": "leapfrog",
+  "n_particles": 30000,
+  "n_steps": 99,
+  "halo_flattening": "density",
+  "seed": 2601
+ }
+}

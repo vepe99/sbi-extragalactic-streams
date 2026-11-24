@@ -32,7 +32,7 @@ from scipy import special
 from config import REPO, Config
 
 PARAM_NAMES = ["logM", "Rs", "dirx", "diry", "dirz", "logm", "rs", "x0", "z0", "vx0", "vy0", "vz0", "time", "sig", "prog"]
-N_PAR, I_SIG, I_PROG = len(PARAM_NAMES), 13, 14
+N_PAR, I_X0, I_SIG, I_PROG = len(PARAM_NAMES), 7, 13, 14
 KMS_TO_KPCGYR = 1.0227121650537077
 
 
@@ -96,6 +96,10 @@ class Grid:
     bin_deg: float
     i0: int  # the progenitor sits on the left edge of bin i0
 
+    @classmethod
+    def from_sims(cls, sc: dict) -> "Grid":
+        return cls(int(round(2 * sc["phi_max_deg"] / sc["bin_deg"])), float(sc["bin_deg"]), int(round(sc["phi_max_deg"] / sc["bin_deg"])))
+
 
 def run_extents(valid: np.ndarray, i0: int):
     """Lengths (a, b) of the unbroken run of valid bins to the left / right of the progenitor."""
@@ -146,7 +150,7 @@ def load_simulations(cfg: Config) -> dict:
     with h5py.File(files[0], "r") as f:
         sc = json.loads(f.attrs["config"])
         group = {f[g].attrs["ordering"]: g for g in ("track", "track_alt") if g in f}[cfg.ordering]
-    grid = Grid(int(round(2 * sc["phi_max_deg"] / sc["bin_deg"])), float(sc["bin_deg"]), int(round(sc["phi_max_deg"] / sc["bin_deg"])))
+    grid = Grid.from_sims(sc)
     cols = dict(theta="theta", vec="c26_vec", status="status", n_bad="diag/n_bad", dissolved="prog/dissolved",
                 count=f"{group}/count", r_med=f"{group}/r_med", r_hw=f"{group}/r_hw")  # fmt: skip
     raw = {k: [] for k in cols}

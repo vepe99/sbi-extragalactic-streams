@@ -15,9 +15,10 @@ import numpy as np  # noqa: E402
 from scipy import stats  # noqa: E402
 
 from data import I_PROG, I_SIG, N_PAR, load_observed, load_simulations, orientation  # noqa: E402
-from likelihood import importance_weights, log_likelihood, log_prior_latent, model_at  # noqa: E402
-from mock import MockObservations, SelectionDataset, encode_observation, fixed_observations, prog_fraction  # noqa: E402
-from networks import USES_MASK, build_adapter  # noqa: E402
+from likelihood import FLOOR, importance_weights, log_likelihood, log_likelihood_steps, log_prior_latent, model_at  # noqa: E402
+from mock import DeviceDataset, MockObservations, SelectionDataset, encode_observation, fixed_observations, prog_fraction  # noqa: E402
+from nested import BatchPool, Cube  # noqa: E402
+from networks import USES_MASK, build_adapter, network_names  # noqa: E402
 
 fails = []
 
@@ -87,11 +88,41 @@ z = np.random.default_rng(0).standard_normal((200000, 2))
 iw = importance_weights(z, log_prior_latent(z), -0.5 * (z[:, 0] - 1) ** 2 / 0.25)  # prior N(0,1), data N(1, 0.5^2) -> mean 0.8
 check("importance weights recover an analytic posterior mean", abs(np.sum(iw["weights"] * z[:, 0]) - 0.8) < 0.02, efficiency=f"{iw['efficiency']:.2f}")
 
+
+# --- nested sampling (nested.py): its likelihood, its prior transform and the batching of dynesty's calls
+other = {k: v[::-1] for k, v in track.items()}  # every mock track against the model of another stream: most fail a guard
+m2, hw2, cnt2 = model_at(other, grid.i0, l[idx], cfg.span_max)
+args = (mo["r"][idx], mo["sig"][idx], obs[idx], m2, hw2, cnt2, mo["sig_sys"][idx, None], cfg.n_min, cfg.var_ratio)
+ll2, st2 = np.asarray(log_likelihood(*args)), np.asarray(log_likelihood_steps(*args))
+fin = np.isfinite(ll2)
+check("the sampler's likelihood equals the likelihood where the guards hold and is a step below it where one fails",
+      np.array_equal(st2[fin], ll2[fin]) and np.all(st2[~fin] < FLOOR) and np.all(ll2[fin] > FLOOR), guards_hold=f"{fin.mean():.2f}")
+u = np.random.default_rng(1).random((500, N_PAR))
+check("unit cube -> parameters equals the prior's latent transform", np.allclose(np.stack([Cube(prior)(x) for x in u]), prior.from_latent(stats.norm.ppf(u)), rtol=1e-10, atol=1e-10))
+pool = BatchPool(lambda par: par.sum(axis=1), 16)
+
+
+def chain(seed: int) -> float:  # likelihood calls one after the other, a different number per chain, as dynesty's samplers make them
+    r = np.random.default_rng(seed)
+    return sum(pool.call(r.random(3)) for _ in range(r.integers(1, 30)))
+
+
+serial = [chain(k) for k in range(100)]
+n_serial, pool.calls, pool.batches = pool.calls, 0, 0
+check("chains of likelihood calls give the same values batched as one by one", pool.map(chain, range(100)) == serial and pool.calls == n_serial,
+      calls_per_batch=f"{pool.calls / pool.batches:.1f}")
+
 # --- the training dataset
 ds = SelectionDataset(data, seed=3, batch_size=64, adapter=build_adapter(cfg), drop_last=True, augmentations=[MockObservations(cfg, grid, design, 3)])
 b = ds[0]
 want = dict(inference_variables=(64, N_PAR), inference_conditions=(64, 4), summary_variables=(64, cfg.span_max, 5), sample_weight=(64,), fixed_target_mask=(64, N_PAR))
 check("training batches have the shapes the estimator expects", all(b[k].shape == v for k, v in want.items()) and (("summary_mask" in b) == USES_MASK[cfg.summary]))
+dd = DeviceDataset(data, cfg, grid, design, seed=3, batch_size=64, names=network_names(cfg))
+ds2 = SelectionDataset(data, seed=3, batch_size=64, adapter=build_adapter(cfg), drop_last=True, augmentations=[MockObservations(cfg, grid, design, 3)])
+pairs = [tuple({k: np.asarray(v) for k, v in s[i].items()} for s in (ds2, dd)) for i in range(8)]
+diff = max(np.abs(h[k] - d[k]).max() for h, d in pairs for k in h)
+check("batches made on the device equal those made through the host", all(set(h) == set(d) and all(h[k].dtype == d[k].dtype for k in h) for h, d in pairs) and diff < 1e-5,
+      max_abs_diff=f"{diff:.1e}")  # fmt: skip
 zbar = data["z_strata"].mean(1)
 check("streams are drawn in proportion to Z", np.corrcoef(np.bincount(ds.indices, minlength=len(zbar)), zbar)[0, 1] > 0.5)
 

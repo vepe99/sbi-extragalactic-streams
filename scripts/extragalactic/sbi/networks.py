@@ -41,14 +41,18 @@ class FlatMLP(bf.networks.SummaryNetwork):
         return super().get_config() | self.cfg
 
 
+def network_names(cfg: Config) -> dict:
+    """mock.py's name of every network input of a training batch -> BayesFlow's name."""
+    names = dict(zeta="inference_variables", cond="inference_conditions", tokens="summary_variables", weight="sample_weight",
+                 fixed_target_mask="fixed_target_mask")  # fmt: skip
+    return names | (dict(mask="summary_mask") if USES_MASK[cfg.summary] else {})
+
+
 def build_adapter(cfg: Config) -> bf.Adapter:
-    ad = bf.Adapter().convert_dtype("float64", "float32")
-    for a, b in dict(zeta="inference_variables", cond="inference_conditions", tokens="summary_variables", weight="sample_weight").items():
-        ad = ad.rename(a, b)
-    keep = ["inference_variables", "inference_conditions", "summary_variables", "sample_weight", "fixed_target_mask", "fixed_target_value"]
-    if USES_MASK[cfg.summary]:
-        ad, keep = ad.rename("mask", "summary_mask"), keep + ["summary_mask"]
-    return ad.keep(keep)
+    ad, names = bf.Adapter().convert_dtype("float64", "float32"), network_names(cfg)
+    for a, b in names.items():
+        ad = ad.rename(a, b) if a != b else ad
+    return ad.keep([*names.values(), "fixed_target_value"])
 
 
 def build_summary(cfg: Config):
@@ -72,9 +76,23 @@ def build_inference(cfg: Config):
     return net(subnet=subnet, subnet_kwargs=kw)
 
 
+STANDARDIZABLE = ("inference_variables", "summary_variables", "inference_conditions")
+
+
+def standardized(cfg: Config) -> list[str]:
+    """The `standardize` setting -> the variables BayesFlow standardises. It keeps a running mean and sd of each
+    feature (for the tokens over the observed bins only, through the summary mask), stores them in the model and
+    applies them, and their inverse, in `sample` and `log_prob`; a given progenitor position is standardised too."""
+    s = cfg.standardize.strip().lower()
+    names = [] if s in ("", "none") else list(STANDARDIZABLE) if s == "all" else [x.strip() for x in s.split(",")]
+    if set(names) - set(STANDARDIZABLE):
+        raise SystemExit(f"standardize: {cfg.standardize!r} is not none, all or a list of {', '.join(STANDARDIZABLE)}")
+    return names
+
+
 def build_workflow(cfg: Config) -> bf.BasicWorkflow:
     """The workflow owns the estimator, the optimizer (AdamW, cosine decay with warm-up) and the checkpoint:
     `model.keras` in the run directory, rewritten at every epoch that lowers the held-out loss."""
     return bf.BasicWorkflow(adapter=build_adapter(cfg), inference_network=build_inference(cfg), summary_network=build_summary(cfg),
-                            initial_learning_rate=cfg.lr, standardize=None, checkpoint_filepath=str(cfg.run_dir()),
+                            initial_learning_rate=cfg.lr, standardize=standardized(cfg) or None, checkpoint_filepath=str(cfg.run_dir()),
                             checkpoint_name="model", save_best_only=True)  # fmt: skip

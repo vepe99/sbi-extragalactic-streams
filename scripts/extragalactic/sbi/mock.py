@@ -57,11 +57,18 @@ def featurise(phi, r, sig, obs, dissolved, known):
     return tokens, jnp.stack([jnp.asarray(dissolved, jnp.float32), jnp.asarray(known, jnp.float32), jnp.log10(rbar / 30.0), n / 32.0])
 
 
-def make_mock(cfg: Config, grid: Grid, design: dict):
-    """-> f(key, count, r_med, r_hw, dissolved, z_strata) for ONE simulation; vmap it over a batch."""
+def make_mock(cfg: Config, grid: Grid, design: dict, bins: tuple[int, int] | None = None):
+    """-> f(key, count, r_med, r_hw, dissolved, z_strata) for ONE simulation; vmap it over a batch.
+
+    bins = (lo, hi): the track arrays hold only bins lo .. hi - 1 of the grid. A window reaches at most span_max
+    bins to either side of the progenitor, so with those bins in the arrays the result is the same as with all
+    of them (the errors are still drawn for the whole grid, to keep the random numbers)."""
     S_grid, L = jnp.asarray(design["S"]), jnp.arange(cfg.span_max + 1)
     logp0 = jnp.asarray(np.log(design["pS"])[:, None] - np.log(design["S"] + 1.0)[:, None], jnp.float32)
-    T, NB, I0, BIN = cfg.span_max, grid.n_bins, grid.i0, grid.bin_deg
+    LO, HI = bins or (0, grid.n_bins)
+    if LO > grid.i0 - cfg.span_max or HI < grid.i0 + cfg.span_max:
+        raise ValueError(f"bins {LO}..{HI} do not hold the {cfg.span_max} bins either side of the progenitor")
+    T, NB, I0, BIN = cfg.span_max, HI - LO, grid.i0 - LO, grid.bin_deg
     lo, hi = (math.log10(x) for x in cfg.err_level)
     j = jnp.arange(T)
 
@@ -71,7 +78,7 @@ def make_mock(cfg: Config, grid: Grid, design: dict):
         kk = jr.categorical(k[0], jnp.log(z_strata))
         level = 10.0 ** (lo + (kk + jr.uniform(k[1])) * (hi - lo) / z_strata.shape[0])
         tau = jr.uniform(k[2], minval=cfg.err_scatter[0], maxval=cfg.err_scatter[1])
-        sig_grid = jnp.clip(level * jnp.exp(tau * jr.normal(k[3], (NB,))), *cfg.err_clip)
+        sig_grid = jnp.clip(level * jnp.exp(tau * jr.normal(k[3], (grid.n_bins,))[LO:HI]), *cfg.err_clip)
         # 2.-3. comparable bins and their run around the progenitor
         valid = count >= cfg.n_min
         if cfg.var_ratio > 0:
@@ -143,6 +150,37 @@ class SelectionDataset(bf.OfflineDataset):
 
     def shuffle(self) -> None:
         self.indices = self._rng.choice(self.num_samples, size=self.num_samples, p=self._p)
+
+
+class DeviceDataset(SelectionDataset):
+    """The training set held on the JAX device. The streams of a batch are gathered, turned into mock
+    observations and named as the adapter names them in one jitted call, so a batch never visits the host;
+    `SelectionDataset` with `MockObservations` and the adapter copies it there and back, 17 ms a batch at 4096.
+    Same streams, same keys and same numbers as that route (check.py compares the two).
+
+    Only what a window can reach is put on the device: the span_max bins either side of the progenitor, the
+    counts as int16. That is 1.0 GB per million streams at span_max 49 (5.5 GB for train_v2_1715)."""
+
+    def __init__(self, data: dict, cfg: Config, grid: Grid, design: dict, *, seed: int, batch_size: int, names: dict, weight_norm: float = 1.0):
+        super().__init__(dict(z_strata=data["z_strata"]), seed=seed, batch_size=batch_size, adapter=None, drop_last=True)
+        lo, hi = grid.i0 - cfg.span_max, grid.i0 + cfg.span_max
+        self.dev = {k: jnp.asarray(data[k]) for k in ("zeta13", "dissolved", "z_strata")}
+        self.dev |= {k: jnp.asarray(data[k][:, lo:hi]) for k in ("r_med", "r_hw")}
+        self.dev["count"] = jnp.asarray(data["count"][:, lo:hi].astype(np.int16))  # at most n_particles = 30,000
+        self.nbytes = sum(v.nbytes for v in self.dev.values())
+        mock = jax.vmap(make_mock(cfg, grid, design, (lo, hi)))
+
+        def batch(key, idx, dev):  # `dev` is an argument: closed over, it would be compiled in as a constant
+            b = {k: v[idx] for k, v in dev.items()}
+            o = mock(jr.split(key, idx.shape[0]), b["count"].astype(jnp.float32), b["r_med"], b["r_hw"], b["dissolved"], b["z_strata"])
+            o |= dict(zeta=jnp.concatenate([b["zeta13"], o["zeta2"]], axis=1), weight=o["weight"] / weight_norm)
+            return {new: o[old].astype(jnp.float32) for old, new in names.items()}  # as the adapter: all float32, the mask too
+
+        self.fn, self.key, self.calls = jax.jit(batch), jr.key(seed), 0
+
+    def get_batch_by_sample_indices(self, indices) -> dict:
+        self.calls += 1
+        return self.fn(jr.fold_in(self.key, self.calls - 1), jnp.asarray(indices, jnp.int32), self.dev)
 
 
 def fixed_observations(data: dict, cfg: Config, grid: Grid, design: dict, seed: int, n: int, unweighted: bool = False) -> dict:
