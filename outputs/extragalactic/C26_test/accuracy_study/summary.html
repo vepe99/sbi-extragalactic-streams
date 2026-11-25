@@ -1,0 +1,216 @@
+<title>Stream posterior accuracy</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@500;600&display=swap">
+<style>
+/* Layout: one reading column; findings first, then evidence in short sections, each with one figure or table. */
+:root {
+  --bg: #f6f7fa; --surface: #ffffff; --ink: #161a24; --ink-2: #4c5466; --line: #d9dde6;
+  --accent: #2a55c4; --good: #14806a; --bad: #c2532c; --paper: #fcfcfb;
+  --display: "Space Grotesk", "IBM Plex Sans", system-ui, sans-serif;
+  --text: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #11141b; --surface: #191d27; --ink: #e7eaf1; --ink-2: #a2aabb; --line: #2c3342;
+  --accent: #86a6f5; --good: #4fc3a6; --bad: #ee9068; --paper: #fcfcfb; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #11141b; --surface: #191d27; --ink: #e7eaf1; --ink-2: #a2aabb; --line: #2c3342;
+  --accent: #86a6f5; --good: #4fc3a6; --bad: #ee9068; --paper: #fcfcfb; color-scheme: dark }
+body { background: var(--bg); color: var(--ink); font-family: var(--text); font-size: 16px; line-height: 1.55; }
+.page { max-width: 940px; margin: 0 auto; padding-block: 2.5rem 4rem;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: flex; flex-direction: column; gap: 2.4rem; }
+h1, h2 { font-family: var(--display); text-wrap: balance; margin: 0; letter-spacing: -0.01em; }
+h1 { font-size: clamp(1.7rem, 4vw, 2.3rem); font-weight: 600; line-height: 1.15; }
+h2 { font-size: 1.25rem; font-weight: 600; }
+p { margin: 0; max-width: 68ch; }
+.meta { font-family: var(--mono); font-size: 0.8rem; color: var(--ink-2); }
+header, section { display: flex; flex-direction: column; gap: 0.9rem; min-width: 0; }
+.lede { font-size: 1.08rem; }
+.findings { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 0; border-top: 2px solid var(--ink); }
+.findings li { padding: 0.9rem 1rem 1rem 0; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 0.3rem; min-width: 0; }
+.findings b { font-family: var(--display); font-weight: 600; font-size: 1.02rem; }
+.findings span { color: var(--ink-2); font-size: 0.93rem; }
+.num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.scroll { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 0.92rem; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 0.45rem 0.9rem 0.45rem 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-weight: 500; color: var(--ink-2); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; white-space: nowrap; }
+td.r, th.r { text-align: right; }
+td.r { font-family: var(--mono); white-space: nowrap; }
+.good { color: var(--good); } .bad { color: var(--bad); }
+figure { margin: 0; display: flex; flex-direction: column; gap: 0.5rem; }
+figure img { background: var(--paper); border: 1px solid var(--line); border-radius: 6px; display: block; width: 100%; height: auto; }
+figcaption { color: var(--ink-2); font-size: 0.86rem; max-width: 72ch; }
+.chart { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 0.8rem; }
+.chart svg { display: block; width: 100%; height: auto; min-width: 560px; }
+.chart text { font-family: var(--text); fill: var(--ink); font-size: 13px; }
+.chart .sub { fill: var(--ink-2); font-size: 11.5px; }
+.chart .val { font-family: var(--mono); font-size: 11.5px; }
+ol.plan { margin: 0; padding-left: 1.3rem; display: flex; flex-direction: column; gap: 0.75rem; max-width: 72ch; }
+ol.plan b { font-weight: 600; }
+ul.plain { margin: 0; padding-left: 1.2rem; display: flex; flex-direction: column; gap: 0.45rem; max-width: 72ch; }
+code { font-family: var(--mono); font-size: 0.88em; overflow-wrap: anywhere; }
+.note { color: var(--ink-2); font-size: 0.9rem; }
+</style>
+
+<div class="page">
+<header>
+  <p class="meta">train_v2 · 10,000,000 streams · 30,000 particles · 99 leapfrog steps · study of 2026-11-24</p>
+  <h1>What limits the accuracy of the stream posteriors</h1>
+  <p class="lede">The network is already right where it can be checked. What holds it back on long tracks is the simulation set: too few simulations near the observed tracks, a quarter of them from orbits the integrator does not resolve, and exact symmetries that are not used.</p>
+</header>
+
+<section>
+  <ul class="findings">
+    <li><b>Short tracks are solved</b><span>On 30 tracks where the simulation set alone gives the posterior, the network's widths agree within 2–4 % and its means within 0.1 sd, for all 13 physical parameters.</span></li>
+    <li><b>Long tracks lack simulations</b><span>For every observed track of 26 bins or more, fewer than 10 of 10 million simulations fit within the errors. The network overfits its own training streams there by 0.5–0.8 nats.</span></li>
+    <li><b>26 % of examples are unresolved orbits</b><span>Their track jumps when the parameters move by 1e-4 of the prior width, so the exact likelihood is rough. Particle noise, by contrast, is small everywhere.</span></li>
+    <li><b>The transformer is the network's limit</b><span>Twice the width and depth gains 0.35 nats. A larger coupling flow gains nothing. Diffusion gains 0.25. None changes which parameters are recovered.</span></li>
+  </ul>
+</section>
+
+<section>
+  <h2>How far the network is from the exact posterior</h2>
+  <div class="scroll"><table>
+    <thead><tr><th>mock tracks</th><th class="r">importance-sampling efficiency</th><th class="r">simulations carrying the posterior</th><th class="r">held-out − training loss</th></tr></thead>
+    <tbody>
+      <tr><td>6–12 bins</td><td class="r">12 %</td><td class="r">4,000</td><td class="r">0.01 nats</td></tr>
+      <tr><td>13–25 bins</td><td class="r">5 %</td><td class="r">57</td><td class="r">0.17</td></tr>
+      <tr><td>26–49 bins</td><td class="r">1.3 %</td><td class="r">19</td><td class="r">0.5–0.65</td></tr>
+    </tbody>
+  </table></div>
+  <p>The efficiency is the same for the transformer at 94 and 381 epochs and for the MLP summary. The 32 observed tracks are harder than mock ones: the median track has 5 simulations of the set behind its posterior, and the long ones 1 to 5.</p>
+  <p><b>NGC1162 against nested sampling</b> (28 bins, 8.4 million likelihood calls, 9.6 hours on four GPUs): the network's medians lie within 0.56 sd for all 15 parameters and its widths within 20 %, except v<sub>y0</sub> (1.6 times wider), log M (1.3) and t<sub>int</sub> (1.2). Log-evidence −80.69 ± 0.10 from nested sampling, −80.3 from the network's importance weights. The marginals are usable; the joint is not exact (efficiency 0.02 %).</p>
+  <figure><img src="figures/05_prior_weights_summary.png" alt="Left: number of simulations that carry the posterior of each track, falling from thousands for short tracks to about one for long ones. Middle: log-evidence difference between the reversed and the given sense of the angle for each observed track. Right: network posterior width over weighted-simulation width, clustered at one.">
+  <figcaption>Left: simulations of the set that carry the posterior of a track. Middle: which sense of the angle the model prefers for each observed track. Right: network against the weighted simulations on the tracks where the set is dense.</figcaption></figure>
+</section>
+
+<section>
+  <h2>Training experiments</h2>
+  <p>A quarter of the set, 38,900 steps each, compared on the same 20,000 held-out mock tracks. Bars show the held-out loss minus the baseline's (spline flow 8×512, transformer 64×2, 12.19 nats); left of zero is better.</p>
+  <div class="chart scroll">
+  <svg viewBox="0 0 760 330" role="img" aria-label="Held-out loss minus the baseline's for six experiments, for all mock tracks and for long tracks of resolved streams.">
+    <!-- scale: 1 nat = 120 px, zero at x = 330 -->
+    <g class="sub">
+      <line x1="210" y1="38" x2="210" y2="300" stroke="var(--line)"/><text x="210" y="318" text-anchor="middle">−1</text>
+      <line x1="330" y1="30" x2="330" y2="300" stroke="var(--ink)"/><text x="330" y="318" text-anchor="middle">0</text>
+      <line x1="450" y1="38" x2="450" y2="300" stroke="var(--line)"/><text x="450" y="318" text-anchor="middle">+1</text>
+      <line x1="570" y1="38" x2="570" y2="300" stroke="var(--line)"/><text x="570" y="318" text-anchor="middle">+2</text>
+      <line x1="690" y1="38" x2="690" y2="300" stroke="var(--line)"/><text x="690" y="318" text-anchor="middle">+3 nats</text>
+      <rect x="456" y="12" width="12" height="9" fill="var(--ink)"/><text x="474" y="21">all tracks</text>
+      <rect x="556" y="12" width="12" height="9" fill="var(--ink)" fill-opacity="0.4"/><text x="574" y="21">long tracks, resolved orbits</text>
+    </g>
+    <g>
+      <text x="8" y="58">transformer 128×4</text>
+      <rect x="288" y="46" width="42" height="11" fill="var(--good)"/><rect x="247.2" y="59" width="82.8" height="11" fill="var(--good)" fill-opacity="0.45"/>
+      <text class="val" x="282" y="56" text-anchor="end">−0.35</text><text class="val" x="241" y="69" text-anchor="end">−0.69</text>
+
+      <text x="8" y="102">diffusion</text>
+      <rect x="300" y="90" width="30" height="11" fill="var(--good)"/><rect x="286.8" y="103" width="43.2" height="11" fill="var(--good)" fill-opacity="0.45"/>
+      <text class="val" x="294" y="100" text-anchor="end">−0.25</text><text class="val" x="281" y="113" text-anchor="end">−0.36</text>
+
+      <text x="8" y="146">flow matching</text>
+      <rect x="307.2" y="134" width="22.8" height="11" fill="var(--good)"/><rect x="290.4" y="147" width="39.6" height="11" fill="var(--good)" fill-opacity="0.45"/>
+      <text class="val" x="301" y="144" text-anchor="end">−0.19</text><text class="val" x="284" y="157" text-anchor="end">−0.33</text>
+
+      <text x="8" y="190">spline flow 12×1024</text>
+      <rect x="330" y="178" width="12" height="11" fill="var(--bad)"/><rect x="330" y="191" width="14.4" height="11" fill="var(--bad)" fill-opacity="0.45"/>
+      <text class="val" x="348" y="188">+0.10</text><text class="val" x="350" y="201">+0.12</text>
+
+      <text x="8" y="234">resolved orbits only</text>
+      <rect x="330" y="222" width="127.2" height="11" fill="var(--bad)"/><rect x="330" y="235" width="129.6" height="11" fill="var(--bad)" fill-opacity="0.45"/>
+      <text class="val" x="463" y="232">+1.06</text><text class="val" x="465" y="245">+1.08</text>
+
+      <text x="8" y="278">1/16 of the set, not 1/4</text>
+      <rect x="330" y="266" width="190.8" height="11" fill="var(--bad)"/><rect x="330" y="279" width="368.4" height="11" fill="var(--bad)" fill-opacity="0.45"/>
+      <text class="val" x="527" y="276">+1.59</text><text class="val" x="704" y="289">+3.07</text>
+    </g>
+  </svg>
+  </div>
+  <ul class="plain">
+    <li>The correlation of the posterior mean with the truth moves by at most 0.04 between these runs (log M 0.43–0.46, x<sub>0</sub> 0.92–0.93). The gains are in the joint shape of the posterior.</li>
+    <li>Diffusion's density is an ODE solve: 22 minutes for 20,000 densities, against seconds for a coupling flow. Importance weights need those densities.</li>
+    <li>Dropping the unresolved streams does not help on the resolved ones. It removes data, and the long tracks overfit sooner.</li>
+  </ul>
+</section>
+
+<section>
+  <h2>The training set</h2>
+  <figure><img src="figures/02_track_noise.png" alt="Left: share of mock tracks whose likelihood jumps under a tiny parameter shift, large for unresolved orbits and near zero for the others. Middle: the jumps begin at an energy error of one per cent. Right: particle noise per bin against distance from the progenitor, below a tenth of the data error in the median.">
+  <figcaption>6,000 held-out streams simulated again with another particle key and with slightly shifted parameters. Unresolved orbits (energy error above 1 %) are rough in the parameters; particle noise grows slowly along the stream and stays below the errors.</figcaption></figure>
+  <div class="scroll"><table>
+    <thead><tr><th>what</th><th>measured</th></tr></thead>
+    <tbody>
+      <tr><td>Unresolved orbits</td><td>26 % of the examples (18 % of short tracks, 36 % of long). At a shift of 1e-4 prior sd, 15 % then fail a guard and 9 % move by more than 2 in log-likelihood; resolved streams do not move.</td></tr>
+      <tr><td>Particle noise</td><td>0.03 of the data error per bin near the progenitor, 0.08 at 30–48 bins. The far ends need no trimming.</td></tr>
+      <tr><td>Cost of the noise guard</td><td>It removes 5 times (short tracks) to 16 times (long) the simulations that could be compared with an observed track.</td></tr>
+      <tr><td>Bin phase</td><td>The progenitor is always on a bin edge in the mock tracks. A track in shifted bins cannot be had from the stored one (15 times the particle noise at the 90th percentile).</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section>
+  <h2>More particles: a test on good prior samples</h2>
+  <p>7,871 parameter sets taken from train_v2 itself were simulated again with 30,000, 90,000 and, for 1,801 of them, 300,000 particles: 5,000 long streams with a resolved orbit, and the 2,883 simulations that fit the 16 long observed tracks best.</p>
+  <div class="scroll"><table>
+    <thead><tr><th>particles</th><th class="r">long streams that keep 26 usable bins<br>(data error 1 kpc)</th><th class="r">samples that count for a<br>long observed track</th><th class="r">for the two<br>longest tracks</th><th class="r">best log-likelihood<br>(median; largest)</th><th class="r">network loss on<br>the same windows</th></tr></thead>
+    <tbody>
+      <tr><td>30,000</td><td class="r">30 %</td><td class="r">1</td><td class="r">1</td><td class="r">0</td><td class="r">8.08 nats</td></tr>
+      <tr><td>90,000</td><td class="r">52 %</td><td class="r">× 1.6</td><td class="r">× 2.6–3.1</td><td class="r">+2.0; +27</td><td class="r">+0.003 ± 0.007</td></tr>
+      <tr><td>300,000</td><td class="r">68 %</td><td class="r">× 2.0</td><td class="r">× 5.2–6.1</td><td class="r">+3.6; +68</td><td class="r">+0.010 ± 0.016</td></tr>
+    </tbody>
+  </table></div>
+  <figure><img src="figures/11_particle_gallery.png" alt="The eight longest observed tracks with the best-fitting samples at 30,000 particles in blue and at 300,000 in orange; the orange tracks reach the peaks of the data that the blue ones miss.">
+  <figcaption>The eight longest observed tracks with the best samples the guards allow at 30,000 particles (blue) and at 300,000 (orange).</figcaption></figure>
+  <ul class="plain">
+    <li>More particles lengthen what can be used of a long stream and let better-fitting samples count. The best fits come up to those at 30,000 particles with the noise guard off, and not beyond: what the guard hid becomes usable.</li>
+    <li>What the network infers from a given window does not change. Particle noise at 30,000 is not what limits the inference.</li>
+    <li>Three times the particles costs three times as much and gives 1.6 times the usable samples for a typical long track, about 3 times for the longest. For the long tracks most of the evidence sits in simulations the guard excludes at 30,000, which more simulations at 30,000 would not reach.</li>
+    <li>Good samples for long tracks are 9 % of the usable prior draws: lower halo mass (median log M 12.26 against 12.61), heavier progenitor, closer in (x<sub>0</sub> 42 kpc against 76), longer t<sub>int</sub>.</li>
+    <li>A bug surfaced: the simulator stored bin counts as 16-bit integers, which wrap above 32,767 particles. Fixed; train_v2 is not affected.</li>
+  </ul>
+</section>
+
+<section>
+  <h2>Symmetries not yet used</h2>
+  <div class="scroll"><table>
+    <thead><tr><th>scaling</th><th>track</th><th>surviving progenitor</th><th>dissolved progenitor</th></tr></thead>
+    <tbody>
+      <tr><td>masses ×U, velocities ×√U, t<sub>int</sub> ÷√U</td><td>unchanged</td><td class="good">exact</td><td class="bad">broken (3 % median)</td></tr>
+      <tr><td>lengths ×L, velocities ÷√L, t<sub>int</sub> ×L<sup>1.5</sup></td><td>×L</td><td class="good">exact</td><td class="good">exact</td></tr>
+    </tbody>
+  </table></div>
+  <ul class="plain">
+    <li>Tested on the simulator with 3,000 streams: 99 % of resolved streams reproduce to 1e-7. The mass scaling fails for dissolved progenitors only because their mass is ramped to a fixed 1 M<sub>☉</sub>; a relative ramp would restore it.</li>
+    <li>Every simulation can therefore be reused at other scales, drawn from the prior along its orbit, at no simulation cost. For a surviving progenitor the track holds no information along (log M, log m, log v, log t) = (1, 1, ½, −½).</li>
+    <li>The model has a handedness: the progenitor moves anticlockwise. With the angle of the observed track reversed, the simulations fit better by more than 2 in log-evidence for 9 of 32 tracks, and worse for 8. These rest on effective samples of 1–5.</li>
+  </ul>
+</section>
+
+<section>
+  <h2>Plan</h2>
+  <ol class="plan">
+    <li><b>Scale augmentation in the mock observations.</b> Draw (L, U) for every example and multiply the track by L. Exact, free, and it multiplies the set where it is thinnest. Make the mass ramp of dissolved progenitors relative so they get both directions.</li>
+    <li><b>A second, focused set.</b> Simulate from a proposal over the region that makes long, resolved streams (9 % of the usable prior draws: log M below 13.2, massive progenitor, small x<sub>0</sub>, long t<sub>int</sub>), with the prior ratio as loss weight.</li>
+    <li><b>Resolve the orbits.</b> Steps set by the orbit instead of 99 for all. Until then <code>de_max: 0.01</code> restricts a run to resolved orbits for importance and nested sampling.</li>
+    <li><b>Mirror flip.</b> StreaMAX-fit does not orient the tracks (checked at <code>2e6a708</code>), so a stream that turns clockwise on the sky is outside the model. At inference, run the network on each observed track and on its mirror image (angle reversed), and change the signs of v<sub>y0</sub> and <code>diry</code> in the mirror result. In training, flip half of the mock tracks and train a classifier of the sense, which weights the two results; the flow stays on v<sub>y0</sub> &gt; 0.</li>
+    <li><b>Network.</b> Transformer 128×4 or larger with early stopping; diffusion or flow matching if the cost of their densities is acceptable. The larger affine run (flow 12×1024, transformer 128×4) tests this on the whole set.</li>
+    <li><b>Particles.</b> 90,000 for the focused set only, where they pay for themselves on the longest tracks. The whole prior does not need them.</li>
+    <li><b>Bin phase.</b> Needs particles at training time. An ordered truncated SVD stores a stream in 19 kB instead of 360 kB with a track error of 0.7 times the particle noise, but rebuilding tracks runs at 9,400 streams per second: enough to refresh tracks between epochs, not at every step.</li>
+  </ol>
+</section>
+
+<section>
+  <h2>Open points</h2>
+  <ul class="plain">
+    <li>The whole set at the same number of steps as the quarter-set baseline was not run.</li>
+    <li>A larger transformer combined with diffusion was not run.</li>
+    <li>The scale augmentation is tested on the simulator but not implemented in <code>mock.py</code>.</li>
+    <li><code>nested.py</code> does not know <code>de_max</code>.</li>
+    <li>Each experiment ran once; differences below about 0.05 nats are not established.</li>
+    <li>No network was trained on the higher-particle samples: 7,871 are far too few.</li>
+  </ul>
+  <p class="note">Details, numbers and all figures: <code>outputs/extragalactic/C26_test/accuracy_study/README.md</code>.</p>
+</section>
+</div>

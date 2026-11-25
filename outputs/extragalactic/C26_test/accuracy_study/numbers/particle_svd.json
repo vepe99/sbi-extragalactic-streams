@@ -1,0 +1,398 @@
+{
+ "subdir": "train_v2",
+ "n_streams": 400,
+ "particles": 30000,
+ "values_raw": 60000,
+ "kB_raw_float32": 240.0,
+ "chunk": 50,
+ "knot": 20,
+ "methods": {
+  "ordered SVD, rank 1": {
+   "values": 2751,
+   "kB_float32": 11.004,
+   "compression": 21.810250817884405,
+   "views": {
+    "bins of the set": {
+     "median_error_in_particle_noise": {
+      "median": 1.440532459102144,
+      "p90": 5.7333899835903335,
+      "rms": 7.7156248498182585
+     },
+     "width_relative_error_median": 0.11682077943367677,
+     "count_error_in_poisson_sd_median": 0.1424435214643064,
+     "bins_lost": 0.0392156862745098
+    },
+    "shifted by half a bin": {
+     "median_error_in_particle_noise": {
+      "median": 1.4361348100961056,
+      "p90": 5.658801657538341,
+      "rms": 7.873068704753063
+     },
+     "width_relative_error_median": 0.11805648339603347,
+     "count_error_in_poisson_sd_median": 0.1424940999758193,
+     "bins_lost": 0.03832256651702617
+    },
+    "bins of half the width": {
+     "median_error_in_particle_noise": {
+      "median": 1.3065289253870804,
+      "p90": 4.878220147860983,
+      "rms": 7.548286092780257
+     },
+     "width_relative_error_median": 0.12184639283397895,
+     "count_error_in_poisson_sd_median": 0.15811388300841897,
+     "bins_lost": 0.03838383838383838
+    }
+   }
+  },
+  "ordered SVD, rank 2": {
+   "values": 3401,
+   "kB_float32": 13.604,
+   "compression": 17.641870038224052,
+   "views": {
+    "bins of the set": {
+     "median_error_in_particle_noise": {
+      "median": 0.9330715204575053,
+      "p90": 3.8544574730476318,
+      "rms": 5.459433259638074
+     },
+     "width_relative_error_median": 0.08862582892553492,
+     "count_error_in_poisson_sd_median": 0.1424435214643064,
+     "bins_lost": 0.0392156862745098
+    },
+    "shifted by half a bin": {
+     "median_error_in_particle_noise": {
+      "median": 0.9400645857948827,
+      "p90": 3.8017735618103825,
+      "rms": 5.918965331160841
+     },
+     "width_relative_error_median": 0.08758777934295352,
+     "count_error_in_poisson_sd_median": 0.1424940999758193,
+     "bins_lost": 0.03832256651702617
+    },
+    "bins of half the width": {
+     "median_error_in_particle_noise": {
+      "median": 0.893421054445628,
+      "p90": 3.275933693467182,
+      "rms": 5.688366339670969
+     },
+     "width_relative_error_median": 0.09578730077293565,
+     "count_error_in_poisson_sd_median": 0.15811388300841897,
+     "bins_lost": 0.03838383838383838
+    }
+   }
+  },
+  "ordered SVD, rank 4": {
+   "values": 4701,
+   "kB_float32": 18.804,
+   "compression": 12.763241863433311,
+   "views": {
+    "bins of the set": {
+     "median_error_in_particle_noise": {
+      "median": 0.698228791831157,
+      "p90": 2.8127772095650676,
+      "rms": 5.006269300698262
+     },
+     "width_relative_error_median": 0.05999939848183751,
+     "count_error_in_poisson_sd_median": 0.1424435214643064,
+     "bins_lost": 0.0392156862745098
+    },
+    "shifted by half a bin": {
+     "median_error_in_particle_noise": {
+      "median": 0.6970022638371156,
+      "p90": 2.895620015771451,
+      "rms": 5.571466107288718
+     },
+     "width_relative_error_median": 0.05951261887454091,
+     "count_error_in_poisson_sd_median": 0.1424940999758193,
+     "bins_lost": 0.03832256651702617
+    },
+    "bins of half the width": {
+     "median_error_in_particle_noise": {
+      "median": 0.685659163336093,
+      "p90": 2.484249848429886,
+      "rms": 5.17389372757631
+     },
+     "width_relative_error_median": 0.06608887021340244,
+     "count_error_in_poisson_sd_median": 0.15811388300841897,
+     "bins_lost": 0.03838383838383838
+    }
+   }
+  },
+  "ordered SVD, rank 8": {
+   "values": 7301,
+   "kB_float32": 29.204,
+   "compression": 8.218052321599782,
+   "views": {
+    "bins of the set": {
+     "median_error_in_particle_noise": {
+      "median": 0.5215573485781073,
+      "p90": 2.217515102329915,
+      "rms": 3.4611618389540415
+     },
+     "width_relative_error_median": 0.04701988957283982,
+     "count_error_in_poisson_sd_median": 0.1424435214643064,
+     "bins_lost": 0.0392156862745098
+    },
+    "shifted by half a bin": {
+     "median_error_in_particle_noise": {
+      "median": 0.545954747867174,
+      "p90": 2.2568934112211316,
+      "rms": 4.181818613470191
+     },
+     "width_relative_error_median": 0.0486027248464954,
+     "count_error_in_poisson_sd_median": 0.1424940999758193,
+     "bins_lost": 0.03832256651702617
+    },
+    "bins of half the width": {
+     "median_error_in_particle_noise": {
+      "median": 0.5290150698424898,
+      "p90": 2.018714175273291,
+      "rms": 4.398206113732849
+     },
+     "width_relative_error_median": 0.05413647053284433,
+     "count_error_in_poisson_sd_median": 0.15811388300841897,
+     "bins_lost": 0.03838383838383838
+    }
+   }
+  },
+  "ordered SVD, rank 16": {
+   "values": 12501,
+   "kB_float32": 50.004,
+   "compression": 4.799616030717543,
+   "views": {
+    "bins of the set": {
+     "median_error_in_particle_noise": {
+      "median": 0.4280124836723188,
+      "p90": 2.0615276577133037,
+      "rms": 3.0990451291457513
+     },
+     "width_relative_error_median": 0.04134282235747837,
+     "count_error_in_poisson_sd_median": 0.1424435214643064,
+     "bins_lost": 0.0392156862745098
+    },
+    "shifted by half a bin": {
+     "median_error_in_particle_noise": {
+      "median": 0.45865824543291034,
+      "p90": 2.097084675901369,
+      "rms": 3.329839512463717
+     },
+     "width_relative_error_median": 0.0426739870175297,
+     "count_error_in_poisson_sd_median": 0.1424940999758193,
+     "bins_lost": 0.03832256651702617
+    },
+    "bins of half the width": {
+     "median_error_in_particle_noise": {
+      "median": 0.4578008254110094,
+      "p90": 1.8930451327975117,
+      "rms": 3.225005480543702
+     },
+     "width_relative_error_median": 0.046612654774017756,
+     "count_error_in_poisson_sd_median": 0.15811388300841897,
+     "bins_lost": 0.03838383838383838
+    }
+   }
+  },
+  "naive SVD, rank 4": {
+   "values": 3200,
+   "kB_float32": 12.8,
+   "compression": 18.75,
+   "views": {
+    "bins of the set": {
+     "median_error_in_particle_noise": {
+      "median": 10.427696529503335,
+      "p90": 86.74655459857046,
+      "rms": 39.095611077364936
+     },
+     "width_relative_error_median": 0.565432882586289,
+     "count_error_in_poisson_sd_median": 6.5,
+     "bins_lost": 0.16568627450980392
+    },
+    "shifted by half a bin": {
+     "median_error_in_particle_noise": {
+      "median": 9.920032295329197,
+      "p90": 86.08213506801503,
+      "rms": 39.003514179261295
+     },
+     "width_relative_error_median": 0.562852147142992,
+     "count_error_in_poisson_sd_median": 6.632082122104361,
+     "bins_lost": 0.16818132048614912
+    },
+    "bins of half the width": {
+     "median_error_in_particle_noise": {
+      "median": 8.560316345802558,
+      "p90": 69.02498264189089,
+      "rms": 35.35756698179915
+     },
+     "width_relative_error_median": 0.5947289009973111,
+     "count_error_in_poisson_sd_median": 5.363146888846407,
+     "bins_lost": 0.19447811447811447
+    }
+   }
+  },
+  "naive SVD, rank 16": {
+   "values": 12800,
+   "kB_float32": 51.2,
+   "compression": 4.6875,
+   "views": {
+    "bins of the set": {
+     "median_error_in_particle_noise": {
+      "median": 5.36336280522189,
+      "p90": 53.14379892493728,
+      "rms": 30.714539563103372
+     },
+     "width_relative_error_median": 0.39591861492767594,
+     "count_error_in_poisson_sd_median": 3.879464379994013,
+     "bins_lost": 0.056427015250544665
+    },
+    "shifted by half a bin": {
+     "median_error_in_particle_noise": {
+      "median": 5.128927494734754,
+      "p90": 54.23673361118857,
+      "rms": 30.904066802799246
+     },
+     "width_relative_error_median": 0.39895876282448517,
+     "count_error_in_poisson_sd_median": 3.8393596461939334,
+     "bins_lost": 0.053323113982262124
+    },
+    "bins of half the width": {
+     "median_error_in_particle_noise": {
+      "median": 4.406378589153741,
+      "p90": 42.68384482610206,
+      "rms": 27.40292653542032
+     },
+     "width_relative_error_median": 0.4195983879501064,
+     "count_error_in_poisson_sd_median": 3.2200505292384527,
+     "bins_lost": 0.07111111111111111
+    }
+   }
+  },
+  "naive SVD, rank 64": {
+   "values": 51200,
+   "kB_float32": 204.8,
+   "compression": 1.171875,
+   "views": {
+    "bins of the set": {
+     "median_error_in_particle_noise": {
+      "median": 0.06860345928425932,
+      "p90": 5.47696111247855,
+      "rms": 10.705166116677868
+     },
+     "width_relative_error_median": 0.005335578373435932,
+     "count_error_in_poisson_sd_median": 0.0,
+     "bins_lost": 0.008932461873638345
+    },
+    "shifted by half a bin": {
+     "median_error_in_particle_noise": {
+      "median": 0.04625477186689712,
+      "p90": 5.232521510065559,
+      "rms": 10.665030908090724
+     },
+     "width_relative_error_median": 0.0031444171465693357,
+     "count_error_in_poisson_sd_median": 0.0,
+     "bins_lost": 0.0071170480674477175
+    },
+    "bins of half the width": {
+     "median_error_in_particle_noise": {
+      "median": 0.07470188076001724,
+      "p90": 5.035598950431479,
+      "rms": 9.106887703932443
+     },
+     "width_relative_error_median": 0.0067296738187164465,
+     "count_error_in_poisson_sd_median": 0.0,
+     "bins_lost": 0.010841750841750842
+    }
+   }
+  },
+  "subsample, as rank 4": {
+   "values": 4701,
+   "kB_float32": 18.804,
+   "compression": 12.763241863433311,
+   "views": {
+    "bins of the set": {
+     "median_error_in_particle_noise": {
+      "median": 1.969499559868632,
+      "p90": 5.643484974831142,
+      "rms": 3.740201095484204
+     },
+     "width_relative_error_median": 0.08313576890687854,
+     "count_error_in_poisson_sd_median": 23.17439683505737,
+     "bins_lost": 0.529193899782135
+    },
+    "shifted by half a bin": {
+     "median_error_in_particle_noise": {
+      "median": 2.0701863331992305,
+      "p90": 5.769467603027951,
+      "rms": 4.228876288685911
+     },
+     "width_relative_error_median": 0.08138585274428663,
+     "count_error_in_poisson_sd_median": 22.962644091558754,
+     "bins_lost": 0.5322457023978977
+    },
+    "bins of half the width": {
+     "median_error_in_particle_noise": {
+      "median": 1.9259209807592,
+      "p90": 5.594426215187631,
+      "rms": 3.716689350512308
+     },
+     "width_relative_error_median": 0.09484645345269552,
+     "count_error_in_poisson_sd_median": 20.353345076534243,
+     "bins_lost": 0.5703030303030303
+    }
+   }
+  },
+  "subsample, as rank 16": {
+   "values": 12501,
+   "kB_float32": 50.004,
+   "compression": 4.799616030717543,
+   "views": {
+    "bins of the set": {
+     "median_error_in_particle_noise": {
+      "median": 1.1623250432369034,
+      "p90": 3.2561956519056245,
+      "rms": 2.38777189490413
+     },
+     "width_relative_error_median": 0.06272986665411145,
+     "count_error_in_poisson_sd_median": 14.34175883605731,
+     "bins_lost": 0.35718954248366014
+    },
+    "shifted by half a bin": {
+     "median_error_in_particle_noise": {
+      "median": 1.1515039478912716,
+      "p90": 3.3805093929497056,
+      "rms": 2.560057823285408
+     },
+     "width_relative_error_median": 0.06400381263697379,
+     "count_error_in_poisson_sd_median": 14.007840468630224,
+     "bins_lost": 0.35585240337238583
+    },
+    "bins of half the width": {
+     "median_error_in_particle_noise": {
+      "median": 1.1176482247727209,
+      "p90": 3.2624826101812405,
+      "rms": 2.2869156895315843
+     },
+     "width_relative_error_median": 0.0731538992673933,
+     "count_error_in_poisson_sd_median": 12.61185709258315,
+     "bins_lost": 0.38356902356902356
+    }
+   }
+  },
+  "stored track, neighbouring bins averaged": {
+   "values": 0,
+   "kB_float32": 0.0,
+   "compression": 60000.0,
+   "views": {
+    "shifted by half a bin": {
+     "median_error_in_particle_noise": {
+      "median": 1.2411389148316903,
+      "p90": 14.843350680065502,
+      "rms": 16.02432683141038
+     },
+     "width_relative_error_median": 0.09796796755648314,
+     "count_error_in_poisson_sd_median": 1.0,
+     "bins_lost": 0.11332530384320595
+    }
+   }
+  }
+ }
+}

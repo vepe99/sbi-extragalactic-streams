@@ -1,0 +1,28 @@
+{
+ "subdir": "particles_pilot",
+ "n_streams": 5000,
+ "store": {
+  "rank": 4,
+  "chunk": 50,
+  "knot": 20,
+  "dtype": "float32",
+  "kB_per_stream": 18.812819200000003,
+  "GB_for_10_million": 188.12819200000004
+ },
+ "bench": {
+  "device": "gpu",
+  "batch": 1024,
+  "streams_per_second": 9411.739445130455,
+  "ms_per_batch": 108.8002920150757
+ },
+ "against_stored_track": {
+  "bins": 104489,
+  "median_error_in_particle_noise": {
+   "median": 0.7460129862751659,
+   "p90": 3.0830473328472277,
+   "p99": 17.986463523313486
+  },
+  "count_differs": 0.8506671704416648,
+  "bins_lost": 0.03746805883872944
+ }
+}
