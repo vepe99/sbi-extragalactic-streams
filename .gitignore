@@ -16,3 +16,7 @@ external/
 
 # trained models and their logs
 outputs/**/models/
+
+# nested-sampling checkpoints and raw results (large, regenerable)
+outputs/**/nested/**/checkpoint.save
+outputs/**/nested/**/result.npz
