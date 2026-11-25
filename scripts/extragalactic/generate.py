@@ -471,9 +471,11 @@ def theta_to_inputs(theta: np.ndarray):
 # ======================================================================================================
 # Steps 2-3: simulator and track extraction
 # ======================================================================================================
-def bin_track(phi_deg, r, ok, cfg: Config):
+def bin_track(phi_deg, r, ok, cfg: Config, z=None):
     """Fixed bins of `bin_deg` on [-phi_max, phi_max): count, mean, std (ddof 0), median and the 16-84
-    half-width (the two statistics StreaMAX `get_track_2D` returns). Empty bins are NaN."""
+    half-width (the two statistics StreaMAX `get_track_2D` returns). Empty bins are NaN. With `z`, the
+    coordinate of the particles along the line of sight, also its mean per bin (`los_mean`): with the bin's
+    angle and radius it gives the place of the stream in three dimensions."""
     nb, N = cfg.n_bins, r.shape[0]
     idx = jnp.floor((jnp.where(ok, phi_deg, 0.0) + cfg.phi_max_deg) / cfg.bin_deg).astype(jnp.int32)
     inr = ok & (idx >= 0) & (idx < nb)
@@ -496,9 +498,10 @@ def bin_track(phi_deg, r, ok, cfg: Config):
 
     empty = count[:nb] == 0
     nan = lambda a: jnp.where(empty, jnp.nan, a[:nb]).astype(jnp.float32)
+    los = {} if z is None else dict(los_mean=nan(jnp.zeros(nb + 1).at[seg].add(jnp.where(inr, z, 0.0)) / cnt))
     return dict(count=count[:nb], r_mean=nan(mean), r_std=nan(std), r_med=nan(quantile(0.5)),
                 r_hw=nan(0.5 * (quantile(0.84) - quantile(0.16))),
-                n_overflow=jnp.sum(ok & ~inr).astype(jnp.int32))
+                n_overflow=jnp.sum(ok & ~inr).astype(jnp.int32), **los)
 
 
 def gibbons14_angle(x, y, g, ok):
@@ -538,7 +541,7 @@ def _finish(cfg: Config, rep, host, acc_h, energy, xf, vf, t_int, x_sat, v_sat, 
     if cfg.alt_ordering and cfg.track_ordering != "gibbons14":
         phi_other = phi_g14
     phi_deg = jnp.rad2deg(phi)
-    out = bin_track(phi_deg, rN, ok, cfg)
+    out = bin_track(phi_deg, rN, ok, cfg, z=xN[:, 2])
     if cfg.alt_ordering:
         alt = bin_track(jnp.rad2deg(phi_other), rN, ok & jnp.isfinite(phi_other), cfg)
         out.update({f"alt_{k}": alt[k] for k in TRACK_KEYS})
@@ -813,7 +816,7 @@ def track_summaries(count: np.ndarray, r_mean: np.ndarray, cfg: Config) -> dict:
 
 def finalize(raw: dict, cfg: Config) -> dict:
     """Simulator output (numpy) -> everything stored per stream except the parameters."""
-    out = {k: raw[k] for k in TRACK_KEYS + DIAG_KEYS + ALT_KEYS + SOLVER_KEYS + ("dissolved",) if k in raw}
+    out = {k: raw[k] for k in TRACK_KEYS + DIAG_KEYS + ALT_KEYS + SOLVER_KEYS + ("dissolved", "los_mean") if k in raw}
     out.update(track_summaries(raw["count"], raw["r_mean"], cfg))
     unbound = ~(raw["E"] < 0)  # NaN energy counts as not bound
     failed = ~raw["prog_finite"] | (raw["n_bad"] >= cfg.n_particles) | ~np.isfinite(raw["E"])
@@ -924,13 +927,17 @@ def write_shard(path: Path, cfg: Config, idx: np.ndarray, theta: np.ndarray, fin
         f.create_dataset("axis", data=halo_axis(theta).astype(np.float32))
         f.create_dataset("c26_vec", data=c26_vector(theta, cfg).astype(np.float32))
         f.create_dataset("status", data=fin["status"])
-        f.create_dataset("track/count", data=fin["count"].astype(np.int16), **comp)
+        # a bin can hold every particle: int16 wraps above 32,767 (found 2026-11-24 with 90,000 and 300,000 particles)
+        count_dtype = np.int16 if cfg.n_particles < 2**15 else np.int32
+        f.create_dataset("track/count", data=fin["count"].astype(count_dtype), **comp)
         for k in TRACK_KEYS[1:]:
             f.create_dataset(f"track/{k}", data=fin[k].astype(np.float32), **comp)
+        if "los_mean" in fin:  # mean line-of-sight coordinate z of the particles of each bin [kpc]; the sky is the XY plane
+            f.create_dataset("track/los_mean", data=fin["los_mean"].astype(np.float32), **comp)
         f["track"].attrs["ordering"] = cfg.track_ordering
         if cfg.alt_ordering:  # the same track in the other ordering
             f.create_group("track_alt").attrs["ordering"] = "c26" if cfg.track_ordering == "gibbons14" else "gibbons14"
-            f.create_dataset("track_alt/count", data=fin["alt_count"].astype(np.int16), **comp)
+            f.create_dataset("track_alt/count", data=fin["alt_count"].astype(count_dtype), **comp)
             for k in TRACK_KEYS[1:]:
                 f.create_dataset(f"track_alt/{k}", data=fin[f"alt_{k}"].astype(np.float32), **comp)
         # the progenitor (or, if dissolved, its remnant) today, in the frame of the stored track: on the +x axis
@@ -1246,7 +1253,7 @@ def cmd_analyze(cfg: Config, quiet: bool = False) -> dict:
         f.attrs["status_bits"] = json.dumps(STATUS_BITS)
         f.attrs["summary"] = json.dumps(table)
         for k, v in d.items():
-            if k not in TRACK_KEYS:
+            if k not in TRACK_KEYS + ("los_mean",):
                 f.create_dataset(k, data=v)
     (ddir / "summary_table.json").write_text(json.dumps(table, indent=1))
     md = table_markdown(table, cfg)

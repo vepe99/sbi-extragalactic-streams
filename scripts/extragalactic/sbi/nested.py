@@ -29,14 +29,22 @@ are parked their calls go to the cards as one batch each (`BatchPool`). This pro
   checkpoint.save   dynesty's checkpoint, every 5 minutes; a second call resumes from it
   result.npz        every sample with its weight (`samples`, `samples_u` in the unit cube, `logl`, `weights`),
                     `posterior` (equal-weight draws), `logz`, `logzerr`
-  ppc.npz           the model tracks of `ppc_draws` posterior draws, simulated again
-  ppc.png, sky_p1.png   posterior predictive check against the angle and in the plane of the track files
-  corner.png        the posterior. If evaluation_real.py was run for the network of the configuration, its
-                    draws are the blue regions and nested sampling the orange contours
-  metrics.json      ln Z, effective samples, likelihood calls, hours, percentiles of q and of every parameter
+  ppc.npz           the model tracks of `ppc_draws` posterior draws, simulated again, with the mean
+                    line-of-sight coordinate of the stream in every bin
+  ppc.png, sky.png  posterior predictive check against the angle and in the plane of the track files; sky.png
+                    as the sky panels of evaluation_real.py, with the acceleration of the host at the bins
+                    (predictive.py) as arrows
+  corner.png        the posterior, drawn as the corner plots of evaluation_real.py (corner.py): 18 columns,
+                    sky.png in the upper right corner. Blue: nested sampling. If evaluation_real.py was run for
+                    the network of the configuration (`name`), also what it gave for this track: its posterior
+                    (green, dashed) and its simulated draws with their importance weights (orange, in the
+                    corner and in the sky panel, where the orange arrows are their accelerations)
+  metrics.json      ln Z, effective samples, likelihood calls, hours, percentiles of q and of every parameter,
+                    predictive p-value, and under `network` the numbers of evaluation_real.py for the track
 
-Sampling, the simulations of the predictive check and the figures are each skipped if their file exists:
-delete result.npz or ppc.npz to redo one.
+Sampling and the simulations of the predictive check are each skipped if their file exists (delete result.npz
+or ppc.npz to redo one); the figures are always drawn. A call that only simulates and draws takes one free GPU,
+so after an evaluation_real.py of another network the same command with its YAML file redraws the comparison.
 """
 
 from __future__ import annotations
@@ -66,7 +74,7 @@ def worker(conn) -> None:
     it was started with. Receives `spec` (the track, the likelihood settings, the configuration of the
     simulations), compiles simulator + likelihood for the batch sizes in spec["sizes"], then answers
     (tracks, params (n, 15), stream indices or None) with the log-likelihoods, or with the model tracks on the
-    simulation grid as predictive.read_tracks gives them. The index sets the key of the particle release,
+    simulation grid as predictive.read_tracks gives them (count, r_med, r_hw, los, failed). The index sets the key of the particle release,
     None = that of stream 0 for every row."""
     try:
         spec = conn.recv()
@@ -89,7 +97,8 @@ def worker(conn) -> None:
         def run(inp, keys, l, sig_sys):
             res = sim(inp, keys)
             failed = ~res["prog_finite"] | (res["n_bad"] >= gcfg.n_particles) | ~jnp.isfinite(res["E"])  # status bit 16 of generate.py
-            track = dict(r_med=jnp.nan_to_num(res["r_med"]), r_hw=jnp.nan_to_num(res["r_hw"]), count=jnp.where(failed[:, None], 0, res["count"]))
+            track = dict(r_med=jnp.nan_to_num(res["r_med"]), r_hw=jnp.nan_to_num(res["r_hw"]), count=jnp.where(failed[:, None], 0, res["count"]),
+                         los=jnp.nan_to_num(res["los_mean"]))  # mean line-of-sight coordinate per bin: the place of the stream in 3-d
             m, hw, n = model_at(track, spec["i0"], l, spec["T"])
             return log_likelihood_steps(r, sig, obs, m, hw, n, sig_sys[:, None], spec["n_min"], spec["var_ratio"]), track, failed
 
@@ -270,11 +279,11 @@ def loglike(v) -> float:
     return POOL.call(v)
 
 
-def pick_gpus(n: int, interval: int = 30) -> list[str]:
+def pick_gpus(n: int, allocation: str = "", interval: int = 30) -> list[str]:
     """UUIDs of n GPUs that are free now, those with the highest index (as `free_gpu` in config.py); waits until
-    there are n. Under Slurm the allocation is used."""
-    if os.environ.get("SLURM_JOB_ID") and os.environ.get("CUDA_VISIBLE_DEVICES"):
-        return [g for g in os.environ["CUDA_VISIBLE_DEVICES"].split(",") if g][:n]
+    there are n. Under Slurm the `allocation` (its CUDA_VISIBLE_DEVICES) is used."""
+    if allocation:
+        return [g for g in allocation.split(",") if g][:n]
     start = time.time()
     while True:
         free = free_gpus()
@@ -282,6 +291,35 @@ def pick_gpus(n: int, interval: int = 30) -> list[str]:
             return [uuid for _, uuid in free[-n:]]
         print(f"{len(free)} of {n} GPUs free, waiting ({int(time.time() - start)} s)", file=sys.stderr, end="\r")
         time.sleep(interval)
+
+
+def network(cfg, t: dict, grid, flatten: str) -> dict | None:
+    """What evaluation_real.py left for the track `t` and the network of the configuration (`name`), to draw
+    next to nested sampling; None if it was not run for this track. `params` (n, 15): the network's posterior
+    draws; `row`: its numbers for the track (metrics.json); and, if its simulations are there and hold the
+    line-of-sight coordinate, `par` (M, 15), the simulated draws, and `z`, their `replicate` with the importance
+    `weights` and the `accelerations` (one track: the leading axis is 1); `simulated` says whether they are."""
+    from predictive import accelerations, read_simulations, replicate
+
+    d = cfg.run_dir() / ("evaluation_real" + (f"_{cfg.sim_integrator}" if cfg.sim_integrator else "") + (f"_{cfg.eval_tag}" if cfg.eval_tag else ""))
+    find = lambda f: [str(n) for n in np.load(f)["names"]].index(t["title"]) if f.exists() and t["title"] in np.load(f)["names"] else None
+    k = find(d / "posterior.npz")
+    if k is None:
+        return None
+    rows = json.loads((d / "metrics.json").read_text())["tracks"] if (d / "metrics.json").exists() else []
+    out = dict(params=np.load(d / "posterior.npz")["params"][k], simulated=False,
+               row=next(({a: v for a, v in r.items() if a not in ("track", "points")} for r in rows if r["track"] == t["title"]), {}))  # fmt: skip
+    k = find(d / "weights.npz")
+    if k is not None and (d / "simulations/data/manifest.json").exists():
+        saved, sim = np.load(d / "weights.npz"), read_simulations(d, cfg)
+        M = saved["params"].shape[1]
+        if len(sim["count"]) >= (k + 1) * M:
+            par = saved["params"][k].astype(np.float64)
+            z = replicate({a: v[k * M : (k + 1) * M] for a, v in sim.items()}, par[None], [t], grid, cfg)
+            if np.array_equal(z["cover"][0], saved["covering"][k]):  # else: other settings or simulations than the weights are of
+                z |= dict(weights=saved["weights"][k][None]) | accelerations(z, par[None], [t], grid, flatten)
+                out |= dict(par=par, z=z, simulated=True)
+    return out
 
 
 class Progress:
@@ -311,20 +349,22 @@ def main() -> None:
     global POOL
     cfg = parse()
     cpu = cfg.device.startswith("cpu")
-    gpus = None if cpu else pick_gpus(cfg.ns_gpus)  # before the next line empties CUDA_VISIBLE_DEVICES (Slurm)
+    allocation = os.environ.get("CUDA_VISIBLE_DEVICES", "") if os.environ.get("SLURM_JOB_ID") else ""  # the next line empties it
     pick_device(cpu=True)  # this process steers and plots: it stays on the CPU
 
     import dynesty
     import h5py
     from dynesty.utils import quantile
 
-    from corner import corner, physical15
-    from data import PARAM_NAMES, Grid, Prior, load_observed, orientation
+    from corner import corner, physical18
+    from data import I_X0, PARAM_NAMES, Grid, Prior, load_observed, orientation
     from mock import encode_observation
-    from predictive import plt, ppc_panel, replicate, sky_pages
+    from predictive import accelerations, plt, ppc_panel, replicate, sky_panel
 
     if cfg.prog_given:
         raise SystemExit("nested.py infers the progenitor position (15 parameters); prog_given is not written")
+    if cfg.de_max > 0:
+        raise SystemExit("nested.py samples the paper's prior: the cut on the energy error (de_max) is not written")
     wanted = [s for s in cfg.real_tracks.split(",") if s]
     observed = [o for o in load_observed(cfg) if o["name"] in wanted or o["name"].split("_")[0] in wanted]
     if not observed:
@@ -352,15 +392,17 @@ def main() -> None:
         if (out / "settings.json").exists() and json.loads((out / "settings.json").read_text()) != settings:
             raise SystemExit(f"{out} holds a run with other settings (settings.json): delete it or give this one a --ns-tag")
         (out / "settings.json").write_text(json.dumps(settings, indent=1))
+        sampled = (out / "result.npz").exists()  # then one card and one batch size do, for the predictive simulations
         spec = dict(sim=sc, ordering=cfg.ordering, n_min=cfg.n_min, var_ratio=cfg.var_ratio, T=cfg.span_max, i0=grid.i0, S=t["S"], dissolved=True,
-                    r=t["r"], sig=t["sig"], mask=t["mask"], sizes=sizes, warm=prior.from_latent(rng.standard_normal((max(sizes), D))))  # fmt: skip
+                    r=t["r"], sig=t["sig"], mask=t["mask"], sizes=sizes[-1:] if sampled else sizes,
+                    warm=prior.from_latent(rng.standard_normal((max(sizes), D))))  # fmt: skip
         devices, extra = None, {}
 
         def start() -> Devices:  # the workers, when first needed
             nonlocal devices
             if devices is None:
                 t0 = time.time()
-                devices = Devices(["cpu"] if cpu else gpus, spec)
+                devices = Devices(["cpu"] if cpu else pick_gpus(1 if sampled else cfg.ns_gpus, allocation), spec)
                 print(f"{o['name']}: {len(devices.procs)} worker(s) ready in {time.time() - t0:.0f} s: " + "; ".join(
                     f"{i['device']} " + ", ".join(f"{b} streams in {s:.2f} s" for b, s in i["seconds"].items()) for i in devices.info), flush=True)  # fmt: skip
             return devices
@@ -389,39 +431,52 @@ def main() -> None:
         z = np.load(out / "result.npz")
         w, post = z["weights"], z["posterior"]
 
-        # --- posterior predictive check: `ppc_draws` posterior draws simulated again, with the key of the sampling
+        # --- `ppc_draws` posterior draws simulated again, with the key of the sampling; `los`, the line-of-sight
+        #     coordinate of the stream, is what the accelerations need (a ppc.npz from before it was kept is redone)
         M = min(cfg.ppc_draws, len(post))
-        if M > 0 and not ((out / "ppc.npz").exists() and np.array_equal(np.load(out / "ppc.npz")["params"], post[:M])):
-            np.savez(out / "ppc.npz", params=post[:M], **start()(post[:M], tracks=True))
+        if M > 0:
+            old = np.load(out / "ppc.npz") if (out / "ppc.npz").exists() else None
+            if old is None or "los" not in old.files or not np.array_equal(old["params"], post[:M]):
+                np.savez(out / "ppc.npz", params=post[:M], **start()(post[:M], tracks=True))
         if devices is not None:
             devices.close()
         row = dict(track=o["name"], points=settings["points"])
+        net = network(cfg, t, grid, sc["halo_flattening"])  # what evaluation_real.py left for this track, or None
+        if net is not None:
+            row["network"] = dict(name=cfg.name, simulated=net["simulated"], **net["row"])
+
+        # --- posterior predictive check, against the angle and in the plane of the track files
         if M > 0:
             sim = dict(np.load(out / "ppc.npz"))
             par = sim.pop("params")
             rep = replicate(sim, par[None], [t], grid, cfg)
+            rep |= accelerations(rep, par[None], [t], grid, sc["halo_flattening"])
             m, var, cover = rep["m"][0], rep["var"][0], rep["cover"][0]
             chi2 = lambda d: np.sum(np.where(t["mask"], (d - m) ** 2 / var, 0.0), axis=-1)
             row |= dict(covering=float(cover.mean()), p_value=float((chi2(rep["rep"][0]) >= chi2(t["r"]))[cover].mean()) if cover.any() else float("nan"))
-            panel = lambda ax, **kw: ppc_panel(ax, t, rep["rep"][0], m, cover, row, name="nested sampling", **kw)
             fig, ax = plt.subplots(figsize=(6.5, 4.2), constrained_layout=True)
-            panel(ax, legend=True)
+            ppc_panel(ax, t, rep["rep"][0], m, cover, row, legend=True, name="nested sampling")
             fig.savefig(out / "ppc.png", dpi=130)
             plt.close(fig)
-            sky_pages([t], rep, par[None], [row], grid, out)
-            extra = dict(ppc=lambda ax: panel(ax, legend=True, fontsize=10))
+            # blue: nested sampling; orange: the network's simulated draws with their importance weights; arrows:
+            # the acceleration of the host at the bins, for both
+            sky = lambda ax, fontsize: sky_panel(ax, t, rep, 0, par[:, I_X0], grid.bin_deg, row, legend=True, fontsize=fontsize, accel=True,
+                                                 name="nested sampling", other=(net["z"], 0) if net and "z" in net else None)  # fmt: skip
+            fig, ax = plt.subplots(figsize=(8.5, 8.5), constrained_layout=True)
+            sky(ax, 9)
+            fig.savefig(out / "sky.png", dpi=130)
+            plt.close(fig)
+            extra = dict(ppc=lambda ax: sky(ax, 10))
 
-        # --- corner plot, next to the network's posterior if evaluation_real.py left one for this track
-        net = cfg.run_dir() / ("evaluation_real" + (f"_{cfg.sim_integrator}" if cfg.sim_integrator else "")) / "posterior.npz"
-        phys, big = physical15(z["samples"]), w > 1e-6 * w.max()
-        prior_phys = physical15(prior.from_latent(rng.standard_normal((20000, D))))
-        title = f"{o['name']}: {settings['points']} points, ln Z = {float(z['logz']):.2f} +- {float(z['logzerr']):.2f}"
-        if net.exists() and o["name"] in np.load(net)["names"]:
-            n = np.load(net)
-            corner(physical15(n["params"][list(n["names"]).index(o["name"])]), prior_phys, out / "corner.png", title, weighted=(phys[big], w[big]),
-                   blue=f"network posterior ({cfg.name})", orange="nested-sampling samples, weighted", **extra)  # fmt: skip
-        else:
-            corner(physical15(post), prior_phys, out / "corner.png", title, blue="nested sampling, equal-weight draws", **extra)
+        # --- corner plot: nested sampling (blue), with what the network of the configuration gave for this track:
+        #     its simulated draws importance weighted (orange) and its posterior as it is (green)
+        prior_phys = physical18(prior.from_latent(rng.standard_normal((20000, D))))
+        title = f"{o['name']}: {settings['points']} points, nested sampling: ln Z = {float(z['logz']):.2f} +- {float(z['logzerr']):.2f}"
+        if net is not None:
+            extra |= dict(third=(physical18(net["params"]), f"network posterior ({cfg.name})"))
+            if "z" in net:
+                extra |= dict(weighted=(physical18(net["par"]), net["z"]["weights"][0]), orange="draws of the network, importance weighted")
+        corner(physical18(post), prior_phys, out / "corner.png", title, blue="nested sampling, equal-weight", **extra)
 
         pct = lambda x: [float(v) for v in quantile(x, [0.16, 0.5, 0.84], weights=w)]
         row |= dict(logz=float(z["logz"]), logzerr=float(z["logzerr"]), effective_samples=float(1.0 / np.sum(w**2)), samples=len(w), iterations=int(z["niter"]),

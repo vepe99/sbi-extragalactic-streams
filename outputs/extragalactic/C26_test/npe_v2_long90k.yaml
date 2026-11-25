@@ -1,0 +1,87 @@
+# SBI run on train_v2 with its long streams at 90,000 particles: MLP summary, affine coupling flow, 1000 epochs
+# (asked by Giuseppe on 2026-11-24, after outputs/extragalactic/C26_test/accuracy_study/README.md).
+# Started from npe_v2_mlp.yaml; changed: `replace_tracks`, `transform: affine`, `lr: 0.0005`, `epochs: 1000`.
+# The twin run is npe_v2_long90k_scaleaug.yaml: the same with the scale augmentation on; nothing else differs.
+#
+#   uv run --extra gpu python scripts/extragalactic/sbi/train.py --config outputs/extragalactic/C26_test/npe_v2_long90k.yaml --gpu -1
+#   uv run --extra gpu python scripts/extragalactic/sbi/nll.py --runs npe_mlp_affine_long90k_1000epoch_vr4_5e4lr npe_mlp_affine_long90k_scaleaug_1000epoch_vr4_5e4lr --train
+#
+# Paths are relative to the repository root. Every field of Config (scripts/extragalactic/sbi/config.py) can be
+# set here; the ones left out keep their defaults. Results go to outputs/extragalactic/C26_test/models/<name>/.
+
+name: npe_mlp_affine_long90k_1000epoch_vr4_5e4lr
+
+# --- data
+out: outputs/extragalactic/C26_test
+subdir: train_v2            # the whole set: 2000 shards, 10,000,000 streams (leapfrog), complete on 2026-11-24 01:13
+replace_tracks: train_v2_long90k   # the 644,256 long streams of train_v2 (resolved orbit, a run of >= 26 bins with enough
+                            # particles) simulated again with 90,000 particles: their tracks take the place of the stored ones
+ordering: c26               # c26 | gibbons14 (the ordering of 2026b, stored as track_alt/)
+val_frac: 0.1               # the last 10 % of the usable streams are held out
+n_val: 600000               # fixed mock tracks of the held-out streams, the validation set
+
+# --- mock observations (the augmentation)
+n_min: 10                   # model particles a bin needs (guard 1 of 2026b) at 30,000 particles; 30 for the streams with 90,000
+var_ratio: 4.0              # model variance <= data variance / 4 (guard 2); 0 = off
+span_max: 49                # longest mock track in bins (= tokens); the longest observed track spans 49
+p_known: 0.0                # progenitor position never given to the network: inferred as a nuisance parameter
+sig_sys_max: 5.0            # kpc; sigma_sys ~ U(0, sig_sys_max)
+scale_aug: false            # scale augmentation of the training examples (mock.py): off here, on in the twin run
+
+# --- networks
+inference: flow             # flow | diffusion | flow_matching
+transform: affine           # the coupling flow's transform: affine (scale and shift) | spline. Of the earlier MLP runs the
+                            # affine one at lr 0.0005 ran through, the spline one at 0.001 diverged
+backbone: mlp               # for diffusion / flow_matching: mlp | transformer
+depth: 8                    # coupling layers
+width: 512
+flow_layers: 2              # hidden layers of the MLP in each coupling layer
+summary: mlp                # FlatMLP (networks.py): the 49 x 5 token grid flattened to 245 numbers, then a residual MLP.
+                            # It gets no padding mask; the "observed" flag of every bin is one of the 5 token features
+summary_dim: 64
+embed_dim: 256              # for the MLP summary: n_blocks hidden layers of width 2 * embed_dim, here 4 x 512
+n_blocks: 4
+n_heads: 4                  # not used by the MLP summary
+dropout: 0.05
+standardize: all            # BayesFlow's standardisation: none | all | list of inference_variables, summary_variables, inference_conditions
+
+# --- training
+epochs: 1000
+batch_size: 8192
+lr: 0.0005
+seed: 2607
+cpu: false                  # false = take a free GPU with autocvd
+data_on_device: true        # training set on the GPU, batches made there (6.8 GB; 6.9 GB with the scale augmentation).
+                            # start.sh in the run directory falls back to the host if the set and the step do not fit on the card
+
+# --- evaluation.py (mock tracks of held-out streams)
+# The predictive check and the importance weights make the likelihood of a posterior draw as the training set
+# was made (predictive.more_particles): the draw is simulated with 30,000 particles, and if that stream is long
+# by the rule of `replace_tracks` it is simulated again with 90,000 and compared with guard 1 at 30.
+# nested.py and prior_weights.py do not do this yet: they use 30,000 particles for every stream.
+n_test: 1000                # mock tracks for recovery, calibration, contraction
+n_samples: 1000             # posterior draws per track
+length_edges: [12, 25]      # recovery, calibration and contraction also per length class: short 6-12 bins, medium 13-25, long 26-49
+ppc_tracks: 32              # mock tracks in the posterior predictive check
+ppc_draws: 1000             # posterior draws per track that are simulated again and importance weighted (also for
+                            # evaluation_real.py); = n_samples: every draw is weighted
+
+# --- evaluation_real.py (observed STRRINGS tracks)
+real_tracks: ""             # "" = all 32, or e.g. NGC5907,NGC1162
+importance: true            # importance weights with the likelihood of 2026b (prior x likelihood / q)
+prog_given: false           # true needs p_known > 0 at training
+
+# --- simulations of posterior draws (generate.py, same integrator as the training set; on the GPU the
+#     evaluation holds plus the free ones. sim_device: cpu puts them on sim_workers CPU processes)
+sim_workers: 16             # most GPUs (or CPU processes) used
+sim_cores: ""               # CPU only: e.g. 0-15 to pin the processes
+
+# --- nested.py (dynesty on the tracks named with --real-tracks; results in <out>/nested/<track>/). It samples
+#     the posterior this file defines: prior and simulator of `subdir`, `ordering`, `n_min`, `var_ratio`,
+#     `sig_sys_max`, progenitor position inferred. The network settings play no part, so every file with the
+#     same values of those shares one nested run, and corner.png compares it with the network of `name`
+ns_gpus: 4                  # free GPUs, one worker each
+ns_batch: 128               # streams per GPU and call
+ns_nlive: 2000              # live points; with ns_sample and ns_neff the "paper" preset of StreaMAX-fit
+ns_sample: rslice
+ns_neff: 10000              # effective posterior samples at which the run ends

@@ -1,0 +1,78 @@
+# SBI run with an affine coupling flow: the run npe_trainv2_1000epoch_vr4_5e4lr with `transform: affine` in place of
+# the rational-quadratic spline (asked by Giuseppe on 2026-11-24, after the NaNs traced to BayesFlow's spline).
+# Data, mock observations, summary network, training and validation settings are those of that run; only the
+# transform and the name differ.
+#
+#   uv run --extra gpu python scripts/extragalactic/sbi/train.py           --config outputs/extragalactic/C26_test/npe_v2_coupling.yaml
+#   uv run --extra gpu python scripts/extragalactic/sbi/evaluation.py      --config outputs/extragalactic/C26_test/npe_v2_coupling.yaml
+#   uv run --extra gpu python scripts/extragalactic/sbi/evaluation_real.py --config outputs/extragalactic/C26_test/npe_v2_coupling.yaml
+#
+# Paths are relative to the repository root. Every field of Config (scripts/extragalactic/sbi/config.py) can be
+# set here; the ones left out keep their defaults. Results go to outputs/extragalactic/C26_test/models/<name>/.
+
+name: npe_coupling_trainv2_1000epoch_vr4_5e4lr
+
+# --- data
+out: outputs/extragalactic/C26_test
+subdir: train_v2            # the whole set: 2000 shards, 10,000,000 streams (leapfrog), complete on 2026-11-24 01:13
+ordering: c26               # c26 | gibbons14 (the ordering of 2026b, stored as track_alt/)
+val_frac: 0.1               # the last 10 % of the usable streams are held out
+n_val: 600000               # fixed mock tracks of the held-out streams, the validation set
+
+# --- mock observations (the augmentation)
+n_min: 10                   # model particles a bin needs (guard 1 of 2026b)
+var_ratio: 4.0              # model variance <= data variance / 4 (guard 2); 0 = off
+span_max: 49                # longest mock track in bins (= tokens); the longest observed track spans 49
+p_known: 0.0                # progenitor position never given to the network: inferred as a nuisance parameter
+sig_sys_max: 5.0            # kpc; sigma_sys ~ U(0, sig_sys_max)
+
+# --- networks
+inference: flow             # flow | diffusion | flow_matching
+transform: affine           # the coupling flow's transform: affine (scale and shift) | spline
+backbone: mlp               # for diffusion / flow_matching: mlp | transformer
+depth: 8                    # coupling layers
+width: 512
+flow_layers: 2              # hidden layers of the MLP in each coupling layer
+summary: transformer        # transformer | timeseries | mlp; the transformer takes the padding mask (missing bins, shorter tracks)
+summary_dim: 64
+embed_dim: 64
+n_blocks: 2
+n_heads: 4                  # must divide embed_dim
+dropout: 0.05
+standardize: all            # BayesFlow's standardisation: none | all | list of inference_variables, summary_variables, inference_conditions
+
+# --- training
+epochs: 1000
+batch_size: 4096
+lr: 0.0005
+seed: 2607
+cpu: false                  # false = take a free GPU with autocvd
+data_on_device: true        # training set on the GPU, batches made there
+
+# --- evaluation.py (mock tracks of held-out streams)
+n_test: 1000                # mock tracks for recovery, calibration, contraction
+n_samples: 1000             # posterior draws per track
+length_edges: [12, 25]      # recovery, calibration and contraction also per length class: short 6-12 bins, medium 13-25, long 26-49
+ppc_tracks: 32              # mock tracks in the posterior predictive check
+ppc_draws: 1000             # posterior draws per track that are simulated again and importance weighted (also for
+                            # evaluation_real.py); = n_samples: every draw is weighted
+
+# --- evaluation_real.py (observed STRRINGS tracks)
+real_tracks: ""             # "" = all 32, or e.g. NGC5907,NGC1162
+importance: true            # importance weights with the likelihood of 2026b (prior x likelihood / q)
+prog_given: false           # true needs p_known > 0 at training
+
+# --- simulations of posterior draws (generate.py, same integrator as the training set; on the GPU the
+#     evaluation holds plus the free ones. sim_device: cpu puts them on sim_workers CPU processes)
+sim_workers: 16             # most GPUs (or CPU processes) used
+sim_cores: ""               # CPU only: e.g. 0-15 to pin the processes
+
+# --- nested.py (dynesty on the tracks named with --real-tracks; results in <out>/nested/<track>/). It samples
+#     the posterior this file defines: prior and simulator of `subdir`, `ordering`, `n_min`, `var_ratio`,
+#     `sig_sys_max`, progenitor position inferred. The network settings play no part, so every file with the
+#     same values of those shares one nested run, and corner.png compares it with the network of `name`
+ns_gpus: 4                  # free GPUs, one worker each
+ns_batch: 128               # streams per GPU and call
+ns_nlive: 2000              # live points; with ns_sample and ns_neff the "paper" preset of StreaMAX-fit
+ns_sample: rslice
+ns_neff: 10000              # effective posterior samples at which the run ends

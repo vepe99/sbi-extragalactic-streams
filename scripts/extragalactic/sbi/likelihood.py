@@ -52,11 +52,12 @@ def log_likelihood_steps(r, sig, obs, m, hw, n, sig_sys, n_min: float = 3.0, var
     return jnp.maximum(ll, FLOOR) - STEP_FEW * jnp.sum(few, axis=-1) - STEP_NOISY * jnp.sum(noisy, axis=-1)
 
 
-def model_at(track: dict, i0: int, l, T: int) -> tuple:
+def model_at(track: dict, i0: int, l, T: int, keys: tuple = ("r_med", "r_hw", "count")) -> tuple:
     """Model track (m, hw, n) in the T bins of a window that has l bins left of the progenitor.
-    track: r_med, r_hw, count on the simulation grid (..., n_bins); l: integer array broadcastable to it."""
+    track: r_med, r_hw, count on the simulation grid (..., n_bins); l: integer array broadcastable to it.
+    `keys` names other columns of `track` to take in those bins."""
     bins = jnp.clip(i0 - jnp.asarray(l)[..., None] + jnp.arange(T), 0, track["count"].shape[-1] - 1)
-    return tuple(jnp.take_along_axis(jnp.asarray(track[k], jnp.float32), bins, axis=-1) for k in ("r_med", "r_hw", "count"))
+    return tuple(jnp.take_along_axis(jnp.asarray(track[k], jnp.float32), bins, axis=-1) for k in keys)
 
 
 def log_prior_latent(zeta):

@@ -43,7 +43,7 @@ name: npe_trainv2_500epoch_vr4_5e4lr
 
 # --- training
 epochs: 500
-batch_size: 8192            # GPU memory of a training step at 4096: 26.9 GiB for embed_dim 256 / 6 blocks, much less for this network (not measured)
+batch_size: 2096            # GPU memory of a training step at 4096: 26.9 GiB for embed_dim 256 / 6 blocks, much less for this network (not measured)
 lr: 0.0005
 seed: 2607
 cpu: false                  # false = take a free GPU with autocvd

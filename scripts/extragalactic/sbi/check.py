@@ -7,14 +7,16 @@ One line per test; exits non-zero if one fails. Takes the same options as train.
 
 from __future__ import annotations
 
+import dataclasses
+
 from config import parse
 
 cfg = parse()
 
 import numpy as np  # noqa: E402
-from scipy import stats  # noqa: E402
+from scipy import optimize, stats  # noqa: E402
 
-from data import I_PROG, I_SIG, N_PAR, load_observed, load_simulations, orientation  # noqa: E402
+from data import G_KPC_GYR_MSUN, I_PROG, I_SIG, N_PAR, host_acceleration, load_observed, load_simulations, orientation  # noqa: E402
 from likelihood import FLOOR, importance_weights, log_likelihood, log_likelihood_steps, log_prior_latent, model_at  # noqa: E402
 from mock import DeviceDataset, MockObservations, SelectionDataset, encode_observation, fixed_observations, prog_fraction  # noqa: E402
 from nested import BatchPool, Cube  # noqa: E402
@@ -48,12 +50,15 @@ n = 20000
 mo = fixed_observations(data, cfg, grid, design, seed=1, n=n)
 live, obs, S, l = mo["weight"] > 0, mo["mask"], mo["S"], mo["l"]  # with the model-noise guard a draw can have no window
 check("window lies inside the run of comparable bins", np.all(((l <= mo["a"]) & (S - l <= mo["b"]))[live]), spans=f"{S[live].min()}-{S[live].max()}")
-guard = (mo["n"] >= cfg.n_min) & (mo["hw"] ** 2 / np.maximum(mo["n"], 1) * cfg.var_ratio <= mo["sig"] ** 2 * (1 + 1e-5))
+guard = (mo["n"] >= mo["n_min"][:, None]) & (mo["hw"] ** 2 / np.maximum(mo["n"], 1) * cfg.var_ratio <= mo["sig"] ** 2 * (1 + 1e-5))
 check("every observed bin passes both guards of the paper", np.all(guard[live][obs[live]]))
 med = np.array([np.median(p[m]) for p, m in zip(mo["phi"], obs)])
 check("angles are centred on the median observed angle", np.abs(med).max() < 1e-3)
 chi2 = np.sum(np.where(obs, (mo["r"] - mo["m"]) ** 2 / (mo["sig"] ** 2 + mo["sig_sys"][:, None] ** 2), 0.0)) / obs.sum()
 check("mock radii scatter as N(m, sigma_data^2 + sigma_sys^2)", abs(chi2 - 1) < 0.02, chi2_per_point=f"{chi2:.4f}")
+m0 = fixed_observations(data, dataclasses.replace(cfg, noise_scale=0.0), grid, design, seed=1, n=2000)
+check("noise_scale 0 gives the model track, in the same windows", np.array_equal(m0["r"], m0["m"]) and np.array_equal(m0["mask"], obs[:2000])
+      and np.array_equal(m0["sig"], mo["sig"][:2000]))  # fmt: skip
 par2 = prior.from_latent(mo["zeta"][:, [I_SIG, I_PROG]], cols=[I_SIG, I_PROG])
 check("sigma_sys and the progenitor position map back from their latent values",
       np.allclose(par2[:, 0], mo["sig_sys"], rtol=1e-3, atol=1e-3) and np.all(np.floor(par2[:, 1] * (S + 1)) == l))
@@ -123,7 +128,53 @@ pairs = [tuple({k: np.asarray(v) for k, v in s[i].items()} for s in (ds2, dd)) f
 diff = max(np.abs(h[k] - d[k]).max() for h, d in pairs for k in h)
 check("batches made on the device equal those made through the host", all(set(h) == set(d) and all(h[k].dtype == d[k].dtype for k in h) for h, d in pairs) and diff < 1e-5,
       max_abs_diff=f"{diff:.1e}")  # fmt: skip
+raw = MockObservations(cfg, grid, design, 3, extras=True)({k: v[ds2.indices[:64]] for k, v in data.items()})  # batch 0 as it was made
+t0, dead = np.asarray(pairs[0][0]["summary_variables"]), raw["weight"] == 0
+check("a rejected draw keeps weight 0 and takes the inputs of an accepted one",
+      np.array_equal(pairs[0][0]["sample_weight"] == 0, dead) and np.allclose(t0[~dead], raw["tokens"][~dead], atol=1e-5)
+      and all(any(np.allclose(t0[i], t0[j], atol=1e-6) for j in np.flatnonzero(~dead)) for i in np.flatnonzero(dead)),
+      rejected=f"{dead.sum()} of 64")  # fmt: skip
 zbar = data["z_strata"].mean(1)
+
+# --- the coupling flow's spline (networks.py guards BayesFlow's): a point right of the domain, the first inner knot's derivative at 0
+import jax  # noqa: E402
+
+import networks  # noqa: E402
+
+SplineTransform = networks._spline_transform.SplineTransform
+
+rng = np.random.default_rng(5)
+spline, plain = SplineTransform(), SplineTransform()
+plain.method_fn = networks._bayesflow_spline
+p = {k: rng.normal(size=(64, s)).astype(np.float32) for k, s in spline.parameter_sizes.items()}
+x = rng.normal(0, 4, 64).astype(np.float32)  # inside and outside the domains
+x[0], p["derivatives"][0, 0] = 50.0, -200.0
+
+
+def total(t, x, p):
+    z, lj = t._forward(x, t.constrain_parameters(p))
+    return z.sum() + lj.sum(), (z, lj)
+
+
+(gs, (zs, ls)), (gp, (zp, lp)) = (jax.grad(total, argnums=(1, 2), has_aux=True)(t, x, p) for t in (spline, plain))
+finite = lambda g: bool(np.isfinite(g[0]).all() and all(np.isfinite(v).all() for v in g[1].values()))  # noqa: E731
+check("the guarded spline gives BayesFlow's values, with a finite gradient outside the domain", finite(gs) and np.array_equal(zs, zp) and np.array_equal(ls, lp),
+      outside=f"{int(((x < p['left_edge'][:, 0] - 3) | (x > 3)).sum())} of 64", bayesflow_gradient_finite=finite(gp))  # fmt: skip
 check("streams are drawn in proportion to Z", np.corrcoef(np.bincount(ds.indices, minlength=len(zbar)), zbar)[0, 1] > 0.5)
+
+# --- the acceleration of the host (the arrows of the corner plots)
+rng = np.random.default_rng(3)
+pts, M_h, R_h = rng.standard_normal((50, 3)) * 40, 10.0**12.3, 17.0
+rad = np.linalg.norm(pts, axis=-1, keepdims=True)
+nfw = -G_KPC_GYR_MSUN * M_h * (np.log(1 + rad / R_h) / rad**2 - 1 / (rad * (R_h + rad))) * pts / rad  # the spherical NFW
+r1 = optimize.brentq(lambda r: orientation(np.array([0.0, 0.0, r]))[0] - 1.0, 0.5, 3.0)  # the length of the vector that gives q = 1
+acc1 = [host_acceleration(np.array([12.3, 17.0, 0.3 * r1, -0.5 * r1, np.sqrt(0.66) * r1]), pts, f) for f in ("density", "potential")]
+err1 = max(float(np.abs(a / nfw - 1).max()) for a in acc1)
+check("the host acceleration at q = 1 is that of the spherical NFW", err1 < 1e-4, max_rel=f"{err1:.1e}")
+off = np.array([[30.0, 0.0, 0.0], [20.0, 0.0, 20.0]])  # in the plane of a halo with its axis along z, and at 45 degrees from it
+obl, pro = (host_acceleration(np.array([12.3, 17.0, 0.0, 0.0, v]), off) for v in (0.4, 3.0))  # q = 0.52 and q = 1.47
+check("a flattened halo pulls off the radial direction: towards its plane for q < 1, towards its axis for q > 1",
+      obl[1, 2] / obl[1, 0] > 1 > pro[1, 2] / pro[1, 0] > 0 and abs(obl[0, 2]) < 1e-9 * abs(obl[0, 0]) and obl[0, 0] < 0,
+      az_over_ax=f"{obl[1, 2] / obl[1, 0]:.2f}, {pro[1, 2] / pro[1, 0]:.2f}")
 
 raise SystemExit(f"{len(fails)} check(s) failed: {fails}" if fails else print("all checks passed"))

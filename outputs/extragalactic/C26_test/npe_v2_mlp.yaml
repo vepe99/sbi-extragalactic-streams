@@ -9,7 +9,7 @@
 # Paths are relative to the repository root. Every field of Config (scripts/extragalactic/sbi/config.py) can be
 # set here; the ones left out keep their defaults. Results go to outputs/extragalactic/C26_test/models/<name>/.
 
-name: npe_mlp_trainv2_500epoch_vr4
+name: npe_mlp_trainv2_500epoch_vr4_1e3lr
 
 # --- data
 out: outputs/extragalactic/C26_test
@@ -43,7 +43,8 @@ standardize: all            # BayesFlow's standardisation: none | all | list of 
 # --- training
 epochs: 500
 batch_size: 8192
-lr: 0.001
+lr: 0.001                   # the NaNs of the MLP runs (0.001: epochs 55 and 56; 0.0005: epoch 109) came from BayesFlow's spline, guarded in networks.py.
+                            # At 0.001 the loss also climbs after epoch 40 (12.47 -> 13.05 by epoch 55); at 0.0005 it kept falling
 seed: 2607
 cpu: false                  # false = take a free GPU with autocvd
 data_on_device: true        # training set on the GPU, batches made there
@@ -51,6 +52,7 @@ data_on_device: true        # training set on the GPU, batches made there
 # --- evaluation.py (mock tracks of held-out streams)
 n_test: 1000                # mock tracks for recovery, calibration, contraction
 n_samples: 1000             # posterior draws per track
+length_edges: [12, 25]      # recovery, calibration and contraction also per length class: short 6-12 bins, medium 13-25, long 26-49
 ppc_tracks: 32              # mock tracks in the posterior predictive check
 ppc_draws: 1000             # posterior draws per track that are simulated again and importance weighted (also for
                             # evaluation_real.py); = n_samples: every draw is weighted

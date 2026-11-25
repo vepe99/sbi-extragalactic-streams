@@ -39,6 +39,18 @@ class Config:
     val_frac: float = 0.05  # last fraction of the usable streams, held out for validation and evaluation
     n_val: int = 20000  # fixed mock observations of the held-out streams used as validation set
     include_unbound: bool = True  # the paper keeps the raw prior
+    # drop the streams whose progenitor orbit the simulator's steps do not resolve: relative energy error
+    # (`diag/dE_rel`) above this. 0 = keep all, the paper's prior. 0.01 is the criterion of report.md; above it the
+    # track jumps when the parameters move by 1e-4 of the prior width (scripts/extragalactic/track_noise.py). The
+    # prior is then the paper's restricted to resolved orbits, and the importance weights of the evaluations give
+    # an unresolved draw the weight 0. nested.py does not know this setting yet
+    de_max: float = 0.0
+    # put the tracks of a set of streams of `subdir` that were simulated again with more particles in place of the
+    # stored ones (scripts/extragalactic/long90k.py; its name under <out>/data/, e.g. train_v2_long90k). "" = off.
+    # Replaced, not added: a second copy of a stream would change the prior. Guard 1 is a fraction of the particles,
+    # so a replaced stream needs n_min x N / N_set particles in a bin (30 at 90,000); guard 2 is as it is. A stream
+    # whose new simulation fails the loader's cuts keeps its stored track
+    replace_tracks: str = ""
     obs_dir: str = "outputs/extragalactic/C26_test/data/strrings"
     # --- mock observation (mock.py): the two guards of 2026b sec. 3.3 ...
     n_min: int = 10  # model particles per bin (3 of 10,000 in the paper = 9 of the 30,000 simulated)
@@ -55,12 +67,27 @@ class Config:
     gap_prob: float = 0.3  # share of mock tracks with missing interior bins
     gap_rate_max: float = 0.25  # each interior bin of such a track is missing with a rate U(0, this)
     sig_sys_max: float = 25.0  # kpc; sigma_sys ~ U(0, sig_sys_max), the prior of the paper
+    # factor on the scatter of the mock radii around the model track. 1 = a draw from the likelihood. 0 = the
+    # model track itself (a test of what the track holds without observational noise): errors, guards, windows
+    # and gaps are drawn as before and the tokens still carry sigma, but sigma_sys then leaves no trace in the
+    # track (its posterior is its prior) and the observed tracks and the paper's likelihood do not apply
+    noise_scale: float = 1.0
     # share of examples in which the progenitor position is given to the network instead of inferred. 0 (decided
     # 2026-11-23): never given; the released STRRINGS tracks carry no progenitor position, so it is a nuisance
     # parameter the posterior marginalises over. 0.5 trains both queries (see mock.py)
     p_known: float = 0.0
+    # scale augmentation of the training examples (mock.py, `draw_scale`): the simulator has no scale of its own,
+    # so a stream with lengths x L and masses x U (velocities x sqrt(U / L), t_int x sqrt(L^3 / U)) is the same
+    # stream with its track x L. Every training example then gets its own (L, U), drawn so that the scaled
+    # parameters still follow the prior; a dissolved progenitor only L (its mass is ramped to a fixed 1 Msun).
+    # The fixed mock tracks of the held-out streams are never scaled
+    scale_aug: bool = False
+    scale_points: int = 256  # points of the plane (ln L, ln U) the draw chooses among, per example
     # --- networks (networks.py)
-    inference: str = "flow"  # flow (coupling, spline) | diffusion | flow_matching
+    inference: str = "flow"  # flow (coupling flow) | diffusion | flow_matching
+    # the coupling flow's transform: spline (rational-quadratic, the more flexible) | affine (scale and shift,
+    # BayesFlow's default, with its soft clamp of the scale)
+    transform: str = "spline"
     backbone: str = "mlp"  # subnet of diffusion / flow_matching: mlp | transformer (flow always uses an MLP)
     width: int = 256  # width of the inference subnet
     depth: int = 6  # coupling layers (flow) or subnet layers (diffusion, flow_matching)
@@ -81,7 +108,11 @@ class Config:
     batch_size: int = 512
     lr: float = 5e-4
     seed: int = 2607
+    resume: bool = False  # train.py: take the run <name> up again from its model.keras (see train.py); the other settings must be the run's
     cpu: bool = False  # stay off the GPUs
+    # nvidia-smi index of a card to take as it is, without waiting for a free one: only a card whose processes
+    # are all our own (checked; another user's process on it ends the run). -1 = a free card, the normal way
+    gpu: int = -1
     # hold the training set on the device that trains (1.0 GB per million usable streams at span_max 49) and
     # make the batches there; train.py then lets JAX take 95 % of the card. false = on the host: the same
     # batches, 17 ms a step slower at batch 4096. Use false when the run stops with RESOURCE_EXHAUSTED: the set
@@ -94,7 +125,14 @@ class Config:
     prog_given: bool = False  # pass the progenitor position to the network (needs p_known > 0 at training)
     ppc_tracks: int = 6  # mock tracks in the posterior predictive check
     ppc_draws: int = 64  # posterior draws per track that are simulated again (predictive check, importance weights)
+    # evaluation.py repeats recovery, calibration and contraction for short, medium and long mock tracks. The two
+    # edges between the classes, in bins of track length (first to last bin): 12, 25 gives short 6-12, medium
+    # 13-25, long 26-49, three classes of about equal size under the log-uniform length prior
+    length_edges: tuple = (12.0, 25.0)
     real_tracks: str = ""  # observed tracks to evaluate, comma separated (e.g. NGC5907,NGC1162); "" = all 32
+    # evaluation_real.py writes to evaluation_real[_<integrator>]_<tag>/, next to the evaluation without a tag
+    # (e.g. one track with many more draws); nested.py then compares with that directory
+    eval_tag: str = ""
     importance: bool = True  # importance weights of the simulated draws towards prior x likelihood of the paper
     # where generate.py simulates them: gpu = the card this evaluation holds plus the cards free at that moment
     # (at most sim_workers of them) | cpu = sim_workers processes. A CPU evaluation (`cpu: true`, or no NVIDIA
@@ -142,7 +180,7 @@ class Config:
         return cls(**{k: tuple(v) if isinstance(v, list) else v for k, v in settings.items() if k in names}), (doc if nested else {})
 
 
-EVALUATION_FIELDS = ("n_test", "n_samples", "prog_given", "ppc_tracks", "ppc_draws", "real_tracks", "importance",
+EVALUATION_FIELDS = ("resume", "gpu", "n_test", "n_samples", "prog_given", "ppc_tracks", "ppc_draws", "length_edges", "real_tracks", "eval_tag", "importance",
                      "sim_device", "sim_integrator", "sim_batch", "sim_workers", "sim_cores", "cpu", "data_on_device",
                      "ns_gpus", "ns_batch", "ns_nlive", "ns_sample", "ns_neff", "ns_dlogz", "ns_maxcall", "ns_tag")  # fmt: skip
 
@@ -161,7 +199,7 @@ def parse() -> Config:
     a = vars(p.parse_args())
     path = a.pop("config")
     cfg = dataclasses.replace(Config.load(path)[0] if path else Config(), **{k: v for k, v in a.items() if v is not None})
-    cfg.device = pick_device(cfg.cpu)
+    cfg.device = pick_device(cfg.cpu, cfg.gpu)
     return cfg
 
 
@@ -178,9 +216,10 @@ def trained(cfg: Config) -> Path:
     return run
 
 
-def pick_device(cpu: bool) -> str:
+def pick_device(cpu: bool, gpu: int = -1) -> str:
     """CPU if asked or if the machine has no NVIDIA driver; otherwise one FREE GPU (`free_gpu` waits for one and
-    sets CUDA_VISIBLE_DEVICES). Under Slurm the allocation is used as given."""
+    sets CUDA_VISIBLE_DEVICES). Under Slurm the allocation is used as given. gpu >= 0 names a card to share with
+    our own processes (`own_gpu`)."""
     os.environ.setdefault("KERAS_BACKEND", "jax")
     if cpu or shutil.which("nvidia-smi") is None:
         os.environ["JAX_PLATFORMS"] = "cpu"
@@ -188,7 +227,30 @@ def pick_device(cpu: bool) -> str:
         return "cpu" + ("" if cpu else " (no NVIDIA driver)")
     if os.environ.get("SLURM_JOB_ID") and os.environ.get("CUDA_VISIBLE_DEVICES"):
         return f"gpu {os.environ['CUDA_VISIBLE_DEVICES']} (Slurm)"
+    if gpu >= 0:
+        return f"gpu {own_gpu(gpu)} (shared with our own processes)"
     return f"gpu {free_gpu()} (free)"
+
+
+def own_gpu(index: int) -> str:
+    """Point CUDA_VISIBLE_DEVICES at the card with this nvidia-smi index, which need not be free, after checking
+    that every compute process on it belongs to the user who runs this. The memory left on the card is the
+    caller's concern (XLA_PYTHON_CLIENT_MEM_FRACTION)."""
+    query = lambda what, fields: subprocess.run(["nvidia-smi", f"--query-{what}={fields}", "--format=csv,noheader"],
+                                                capture_output=True, text=True).stdout.splitlines()  # noqa: E731  # fmt: skip
+    uuid = {i.strip(): u.strip() for i, u in (ln.split(",") for ln in query("gpu", "index,uuid") if "," in ln)}.get(str(index))
+    if uuid is None:
+        raise SystemExit(f"gpu {index}: nvidia-smi lists no such card")
+    for pid, card in (ln.split(",") for ln in query("compute-apps", "pid,gpu_uuid") if "," in ln):
+        try:
+            mine = os.stat(f"/proc/{pid.strip()}").st_uid == os.getuid()
+        except FileNotFoundError:  # ended since the query
+            continue
+        if card.strip() == uuid and not mine:
+            raise SystemExit(f"gpu {index} holds a process of another user (pid {pid.strip()}): not used")
+    os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+    os.environ["CUDA_VISIBLE_DEVICES"] = uuid
+    return str(index)
 
 
 def free_gpus() -> list[tuple[str, str]]:

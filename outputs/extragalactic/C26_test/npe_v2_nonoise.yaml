@@ -1,0 +1,71 @@
+# SBI run without observational noise, MLP summary and affine coupling flow (asked by Giuseppe on 2026-11-24).
+# The mock radii are the model track itself, r_b = m_b (`noise_scale: 0`), instead of a draw from
+# N(m_b, sigma_b^2 + sigma_sys^2). The question: does a track constrain q at all, with the noise only hiding it
+# (with noise q has posterior contraction 0.00 and recovery correlation -0.01: npe_trainv2_1000epoch_vr4_5e4lr,
+# epoch 381)?
+# Summary network and training settings are those of npe_mlp_trainv2_500epoch_vr4_5e4lr (npe_v2_mlp.yaml at lr
+# 0.0005), the transform is that of npe_v2_coupling.yaml; data, errors, guards, windows and gaps are those of both.
+# No run with noise has this pair of networks: the nearest are those two.
+#
+#   uv run --extra gpu python scripts/extragalactic/sbi/train.py      --config outputs/extragalactic/C26_test/npe_v2_nonoise.yaml
+#   uv run --extra gpu python scripts/extragalactic/sbi/evaluation.py --config outputs/extragalactic/C26_test/npe_v2_nonoise.yaml
+#
+# What "no noise" leaves in:
+#   - the particle noise of the model track (30,000 particles): up to sigma_b / 2 in a bin, by guard 2;
+#   - sigma_b in the tokens, and sigma_sys among the 15 parameters. Neither leaves a trace in the radii, so the
+#     posterior of sigma_sys is its prior and the loss holds its 1.42 nats: compare the diagnostics per
+#     parameter with those of a run with noise, not the losses.
+# What does not apply: evaluation_real.py (refuses: the observed tracks have noise), and the predictive check
+# and importance weights of evaluation.py, which use the paper's likelihood (`ppc_tracks: 0` below).
+#
+# Paths are relative to the repository root. Every field of Config (scripts/extragalactic/sbi/config.py) can be
+# set here; the ones left out keep their defaults. Results go to outputs/extragalactic/C26_test/models/<name>/.
+
+name: npe_nonoise_mlp_coupling_trainv2_500epoch_vr4_5e4lr
+
+# --- data
+out: outputs/extragalactic/C26_test
+subdir: train_v2            # the whole set: 2000 shards, 10,000,000 streams (leapfrog), complete on 2026-11-24 01:13
+ordering: c26               # c26 | gibbons14 (the ordering of 2026b, stored as track_alt/)
+val_frac: 0.1               # the last 10 % of the usable streams are held out
+n_val: 600000               # fixed mock tracks of the held-out streams, the validation set
+
+# --- mock observations (the augmentation)
+noise_scale: 0.0            # factor on the scatter of the mock radii: 0 = the model track itself, 1 = a draw from the likelihood
+n_min: 10                   # model particles a bin needs (guard 1 of 2026b)
+var_ratio: 4.0              # model variance <= data variance / 4 (guard 2); still decides the window, with the sigma_b drawn as before
+span_max: 49                # longest mock track in bins (= tokens); the longest observed track spans 49
+p_known: 0.0                # progenitor position never given to the network: inferred as a nuisance parameter
+sig_sys_max: 5.0            # kpc; sigma_sys ~ U(0, sig_sys_max); without noise it is drawn and not used
+
+# --- networks
+inference: flow             # flow | diffusion | flow_matching
+transform: affine           # the coupling flow's transform: affine (scale and shift) | spline
+backbone: mlp               # for diffusion / flow_matching: mlp | transformer
+depth: 8                    # coupling layers
+width: 512
+flow_layers: 2              # hidden layers of the MLP in each coupling layer
+summary: mlp                # FlatMLP (networks.py): the 49 x 5 token grid flattened to 245 numbers, then a residual MLP.
+                            # It gets no padding mask; the "observed" flag of every bin is one of the 5 token features
+summary_dim: 64
+embed_dim: 256              # for the MLP summary: n_blocks hidden layers of width 2 * embed_dim, here 4 x 512
+n_blocks: 4
+n_heads: 4                  # not used by the MLP summary
+dropout: 0.05
+standardize: all            # BayesFlow's standardisation: none | all | list of inference_variables, summary_variables, inference_conditions
+
+# --- training
+epochs: 500
+batch_size: 8192
+lr: 0.0005                  # with the MLP summary and noise the loss climbed after epoch 40 at 0.001 and kept falling at 0.0005
+seed: 2607
+cpu: false                  # false = take a free GPU with autocvd
+data_on_device: true        # training set on the GPU (6.8 GB), batches made there. With the transformer summary this did not
+                            # fit on an 11 GB card of compgpu6 (RESOURCE_EXHAUSTED at the first step), and on the host an
+                            # epoch took 212 s. start.sh in the run directory falls back to false if it happens again
+
+# --- evaluation.py (mock tracks of held-out streams, also without noise)
+n_test: 1000                # mock tracks for recovery, calibration, contraction
+n_samples: 1000             # posterior draws per track
+length_edges: [12, 25]      # recovery, calibration and contraction also per length class: short 6-12 bins, medium 13-25, long 26-49
+ppc_tracks: 0               # no predictive check: it replicates data with the likelihood's noise, which these tracks do not have

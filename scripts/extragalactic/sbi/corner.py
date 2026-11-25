@@ -1,12 +1,16 @@
-"""Corner plot of the posterior of one track, with its posterior predictive check in the upper right corner.
+"""Corner plot of the posterior of one track, with its posterior predictive check in the upper right corner. For
+an observed track that check is drawn in the plane of the sky (`track_corners`).
 
-Shown are the 15 parameters with the halo orientation vector replaced by what it stands for (q, cos i, psi):
+Shown are the 15 parameters, the halo orientation vector (d_x, d_y, d_z) followed by what it stands for
+(q, cos i, psi): 18 columns (`physical18`). `physical15` leaves the vector out.
 
   blue     the network's posterior: 68 and 95 % regions of all its draws
   orange   the simulated draws with their importance weights: 68 and 95 % contours and marginals, smoothed
            for the effective sample size, when that reaches `ESS_MIN`. Below it the draws are shown as points
            (marker area proportional to the weight): too few carry weight for a contour
   grey     the prior, on the diagonal
+  green    a third posterior, if given (nested.py: the network's, next to nested sampling): dashed contours
+  purple   the true values, for a mock track
 """
 
 from __future__ import annotations
@@ -14,12 +18,13 @@ from __future__ import annotations
 import numpy as np
 from scipy.ndimage import gaussian_filter, gaussian_filter1d
 
-from data import orientation
-from predictive import ORANGE, plt
+from data import I_X0, orientation
+from predictive import ORANGE, TRUTH, plt, sky_panel
 
 LABELS = [r"$\log_{10} M$", r"$R_s$ [kpc]", r"$q$", r"$\cos i$", r"$\psi$ [rad]", r"$\log_{10} m$", r"$r_s$ [kpc]", r"$x_0$ [kpc]",
           r"$z_0$ [kpc]", r"$v_{x0}$", r"$v_{y0}$", r"$v_{z0}$", r"$t$ [Gyr]", r"$\sigma_{\rm sys}$ [kpc]", "prog"]  # fmt: skip
-BLUE, GREY = "#08306b", "#7b8794"
+LABELS18 = LABELS[:2] + [r"halo $d_x$", r"halo $d_y$", r"halo $d_z$"] + LABELS[2:]  # the halo vector, then q, cos i, psi
+BLUE, GREY, GREEN = "#08306b", "#7b8794", "#1b7f5c"
 ESS_MIN = 10.0
 
 
@@ -27,6 +32,12 @@ def physical15(par) -> np.ndarray:
     """(..., 15) parameters -> the same with (q, cos i, psi) in place of (dirx, diry, dirz)."""
     par = np.asarray(par, np.float64)
     return np.concatenate([par[..., :2], orientation(par[..., 2:5]), par[..., 5:]], axis=-1)
+
+
+def physical18(par) -> np.ndarray:
+    """(..., 15) parameters -> 18 columns: the same with (q, cos i, psi) inserted after (dirx, diry, dirz)."""
+    par = np.asarray(par, np.float64)
+    return np.concatenate([par[..., :5], orientation(par[..., 2:5]), par[..., 5:]], axis=-1)
 
 
 def _levels(H) -> list:
@@ -57,11 +68,15 @@ def _weighted_regions(x, y, w, xlim, ylim, ess: float, bins: int = 36):
 
 
 def corner(samples, prior_samples, file, title: str, weighted: tuple | None = None, ppc=None,
-           blue: str = "network posterior", orange: str = "simulated draws, importance weighted") -> None:
-    """samples (n, 15), prior_samples (N, 15): `physical15` of posterior and prior draws. weighted = (x (M, 15),
-    w (M,)): the simulated draws and their importance weights. ppc(ax) draws the predictive check. blue, orange:
-    what the two are called in the legend (nested.py draws other posteriors with this function)."""
+           blue: str = "network posterior", orange: str = "simulated draws, importance weighted", truth=None,
+           third: tuple | None = None) -> None:
+    """samples (n, D), prior_samples (N, D): `physical15` (D = 15) or `physical18` (D = 18) of posterior and prior
+    draws. weighted = (x (M, D), w (M,)): the simulated draws and their importance weights. ppc(ax) draws the
+    predictive check. blue, orange: what the two are called in the legend (nested.py draws other posteriors with
+    this function). truth (D,): the same columns of the true parameters of a mock track, marked in every panel.
+    third = (x (n, D), name): draws of another posterior, shown as dashed green contours and marginals."""
     D = samples.shape[1]
+    labels = LABELS18 if D == 18 else LABELS
     x_w, w = weighted if weighted is not None else (None, None)
     show_w = w is not None and np.isfinite(w).all() and w.sum() > 0
     ess = float(w.sum() ** 2 / (w**2).sum()) if show_w else 0.0
@@ -72,6 +87,9 @@ def corner(samples, prior_samples, file, title: str, weighted: tuple | None = No
         v = np.concatenate([samples[:, k], x_w[w > 1e-3 * w.max(), k]]) if show_w else samples[:, k]
         lo, hi = np.percentile(samples[:, k], [0.5, 99.5])
         lo, hi = min(lo, v.min()) if show_w else lo, max(hi, v.max()) if show_w else hi
+        lo, hi = (min(lo, truth[k]), max(hi, truth[k])) if truth is not None else (lo, hi)
+        if third is not None:
+            lo, hi = min(lo, np.percentile(third[0][:, k], 0.5)), max(hi, np.percentile(third[0][:, k], 99.5))
         lim.append((lo - 0.04 * (hi - lo) - 1e-9, hi + 0.04 * (hi - lo) + 1e-9))
 
     fig, axes = plt.subplots(D, D, figsize=(1.3 * D, 1.3 * D))
@@ -88,36 +106,51 @@ def corner(samples, prior_samples, file, title: str, weighted: tuple | None = No
                 width = edges[1] - edges[0]
                 ax.stairs(np.histogram(prior_samples[:, j], edges)[0] / (len(prior_samples) * width), edges, color=GREY, lw=0.9)
                 ax.stairs(np.histogram(samples[:, j], edges)[0] / (len(samples) * width), edges, color=BLUE, lw=1.1)
+                if third is not None:
+                    ax.stairs(np.histogram(third[0][:, j], edges)[0] / (len(third[0]) * width), edges, color=GREEN, lw=1.0, ls="--")
                 if contours:
                     h = np.histogram(x_w[:, j], edges, weights=w)[0] / (w.sum() * width)
                     ax.plot(0.5 * (edges[1:] + edges[:-1]), gaussian_filter1d(h, _bandwidth(x_w[:, j], w, lim[j], 40, ess, 1)), color=ORANGE, lw=1.1)
+                if truth is not None:
+                    ax.axvline(truth[j], color=TRUTH, lw=1.2)
                 ax.set_yticks([])
-                ax.set_title(LABELS[j], fontsize=8, pad=3)
+                ax.set_title(labels[j], fontsize=8, pad=3)
             else:
                 H, lv = _regions(samples[:, j], samples[:, i], lim[j], lim[i])
                 ax.contourf(H, levels=lv, extent=[*lim[j], *lim[i]], colors=["#c6dbef", "#6baed6"])
+                if third is not None:
+                    H3, lv3 = _regions(third[0][:, j], third[0][:, i], lim[j], lim[i])
+                    ax.contour(H3, levels=lv3[:2], extent=[*lim[j], *lim[i]], colors=GREEN, linewidths=[0.6, 1.2], linestyles="--", zorder=2)
                 if contours:
                     Hw, lw_ = _weighted_regions(x_w[:, j], x_w[:, i], w, lim[j], lim[i], ess)
                     ax.contour(Hw, levels=lw_[:2], extent=[*lim[j], *lim[i]], colors=ORANGE, linewidths=[0.6, 1.2], zorder=3)
                 elif show_w:
                     ax.scatter(x_w[big, j], x_w[big, i], s=14 * w[big] / w.max(), color=ORANGE, alpha=0.6, lw=0, zorder=3)
+                if truth is not None:
+                    ax.axvline(truth[j], color=TRUTH, lw=0.7, zorder=4)
+                    ax.axhline(truth[i], color=TRUTH, lw=0.7, zorder=4)
+                    ax.plot(truth[j], truth[i], "s", ms=3.5, color=TRUTH, mec="white", mew=0.5, zorder=5)
                 ax.set_ylim(*lim[i])
             ax.set_xlim(*lim[j])
             if i < D - 1:
                 ax.set_xticklabels([])
             else:
-                ax.set_xlabel(LABELS[j], fontsize=8)
+                ax.set_xlabel(labels[j], fontsize=8)
                 ax.tick_params(axis="x", labelrotation=45)
             if j > 0 or i == 0:
                 ax.set_yticklabels([])
             else:
-                ax.set_ylabel(LABELS[i], fontsize=8)
+                ax.set_ylabel(labels[i], fontsize=8)
 
     lines = [title, f"blue: {blue} ({len(samples)} draws), 68 and 95 %", "grey: prior"]
+    if third is not None:
+        lines.append(f"green, dashed: {third[1]} ({len(third[0])} draws), 68 % (thick) and 95 % (thin) contours")
+    if truth is not None:
+        lines.append("purple: true values")
     if show_w:
         lines.append(f"orange: {len(w)} {orange} (effective sample size {ess:.1f})\n   "
                      + ("68 % (thick) and 95 % (thin) contours" if contours else f"shown as points: contours need at least {ESS_MIN:.0f}"))  # fmt: skip
-    p0 = axes[0, 1].get_position()
+    p0 = axes[0, 2].get_position()  # two columns in: the text may run two rows down without touching a panel
     fig.text(p0.x0 + 0.01, p0.y1, "\n".join(lines), va="top", ha="left", fontsize=10, linespacing=1.5)
     if ppc is not None:  # the upper right block of the empty triangle
         rows, col = (D - 1) // 2, D - (D - 1) // 2
@@ -125,3 +158,17 @@ def corner(samples, prior_samples, file, title: str, weighted: tuple | None = No
         ppc(fig.add_axes([a.x0 + 0.035, b.y0 + 0.035, b.x1 - a.x0 - 0.035, a.y1 - b.y0 - 0.06]))
     fig.savefig(file, dpi=90)
     plt.close(fig)
+
+
+def track_corners(tracks: list[dict], rows: list[dict], phys, prior_phys, z: dict | None, par, bin_deg: float, out, truth=None) -> None:
+    """corner_<track>.png in `out`, one per track (observed tracks, or mock tracks with their `truth`).
+    phys (tracks, n, 18): `physical18` of the posterior draws; z = `replicate` of the first M of them with their
+    importance `weights`, par (tracks, M, 15) those draws (None, None when nothing was simulated: the corner then
+    shows the network's posterior alone); truth (tracks, 18): `physical18` of the true parameters of mock tracks.
+    The predictive check in the corner is `sky_panel`: x and y in kpc with the host at the origin, with the
+    acceleration of the host at the bins as arrows if `z` holds it (`accelerations`)."""
+    for i, (t, row) in enumerate(zip(tracks, rows)):
+        M = 0 if z is None else par.shape[1]
+        corner(phys[i], prior_phys, out / f"corner_{t['title'].replace(' ', '_')}.png", f"{t['title']}: {int(t['mask'].sum())} points",
+               weighted=(phys[i, :M], z["weights"][i]) if z else None, truth=None if truth is None else truth[i],
+               ppc=(lambda ax, i=i, t=t, row=row: sky_panel(ax, t, z, i, par[i, :, I_X0], bin_deg, row, legend=True, fontsize=10, accel=True)) if z else None)  # fmt: skip
