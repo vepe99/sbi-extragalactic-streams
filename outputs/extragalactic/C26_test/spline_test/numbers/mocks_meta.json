@@ -1,0 +1,514 @@
+[
+ {
+  "name": "ESO079-003_GROUP",
+  "pool": "prior",
+  "streams": 2349,
+  "guard2": true,
+  "n": 200,
+  "accept": 0.03157063930544594
+ },
+ {
+  "name": "ESO298-016",
+  "pool": "prior",
+  "streams": 2349,
+  "guard2": true,
+  "n": 200,
+  "accept": 0.18604651162790697
+ },
+ {
+  "name": "ESO356-012",
+  "pool": "prior",
+  "streams": 1718,
+  "guard2": true,
+  "n": 200,
+  "accept": 0.26109660574412535
+ },
+ {
+  "name": "IC0120",
+  "pool": "prior",
+  "streams": 376,
+  "guard2": true,
+  "n": 200,
+  "accept": 0.07636502481863307
+ },
+ {
+  "name": "IC1124",
+  "pool": "prior",
+  "streams": 2841,
+  "guard2": true,
+  "n": 200,
+  "accept": 0.5617977528089888
+ },
+ {
+  "name": "IC1657_GROUP",
+  "pool": "prior",
+  "streams": 665,
+  "guard2": true,
+  "n": 200,
+  "accept": 0.12099213551119177
+ },
+ {
+  "name": "NGC0804",
+  "pool": "prior",
+  "streams": 310,
+  "guard2": true,
+  "n": 200,
+  "accept": 0.017985611510791366
+ },
+ {
+  "name": "NGC1162",
+  "pool": "prior",
+  "streams": 665,
+  "guard2": true,
+  "n": 200,
+  "accept": 0.029442072721919624
+ },
+ {
+  "name": "NGC2769",
+  "pool": "prior",
+  "streams": 2349,
+  "guard2": true,
+  "n": 200,
+  "accept": 0.16447368421052633
+ },
+ {
+  "name": "NGC3041",
+  "pool": "prior",
+  "streams": 3279,
+  "guard2": true,
+  "n": 200,
+  "accept": 0.273224043715847
+ },
+ {
+  "name": "NGC4256_GROUP",
+  "pool": "prior",
+  "streams": 557,
+  "guard2": true,
+  "n": 200,
+  "accept": 0.005122032422465234
+ },
+ {
+  "name": "NGC4388_GROUP",
+  "pool": "prior",
+  "streams": 2492,
+  "guard2": true,
+  "n": 200,
+  "accept": 0.1579778830963665
+ },
+ {
+  "name": "NGC4632",
+  "pool": "prior",
+  "streams": 2090,
+  "guard2": true,
+  "n": 200,
+  "accept": 0.23014959723820483
+ },
+ {
+  "name": "NGC4686",
+  "pool": "prior",
+  "streams": 2492,
+  "guard2": true,
+  "n": 200,
+  "accept": 0.3003003003003003
+ },
+ {
+  "name": "NGC5055_GROUP",
+  "pool": "prior",
+  "streams": 2090,
+  "guard2": true,
+  "n": 200,
+  "accept": 0.11204481792717087
+ },
+ {
+  "name": "NGC5263",
+  "pool": "prior",
+  "streams": 594,
+  "guard2": true,
+  "n": 200,
+  "accept": 0.1375515818431912
+ },
+ {
+  "name": "NGC5387",
+  "pool": "prior",
+  "streams": 1571,
+  "guard2": true,
+  "n": 200,
+  "accept": 0.3372681281618887
+ },
+ {
+  "name": "NGC5513_GROUP",
+  "pool": "prior",
+  "streams": 1963,
+  "guard2": true,
+  "n": 200,
+  "accept": 0.09246417013407304
+ },
+ {
+  "name": "NGC5907",
+  "pool": "prior",
+  "streams": 1280,
+  "guard2": true,
+  "n": 200,
+  "accept": 0.16722408026755853
+ },
+ {
+  "name": "PGC000902",
+  "pool": "prior",
+  "streams": 524,
+  "guard2": true,
+  "n": 200,
+  "accept": 0.0693000693000693
+ },
+ {
+  "name": "PGC006791",
+  "pool": "prior",
+  "streams": 3034,
+  "guard2": true,
+  "n": 200,
+  "accept": 0.3105590062111801
+ },
+ {
+  "name": "PGC039258",
+  "pool": "prior",
+  "streams": 751,
+  "guard2": true,
+  "n": 200,
+  "accept": 0.20554984583761562
+ },
+ {
+  "name": "PGC1001085",
+  "pool": "prior",
+  "streams": 216,
+  "guard2": true,
+  "n": 200,
+  "accept": 0.03963535473642489
+ },
+ {
+  "name": "PGC1092512",
+  "pool": "prior",
+  "streams": 524,
+  "guard2": true,
+  "n": 200,
+  "accept": 0.05351886540005352
+ },
+ {
+  "name": "PGC3092153",
+  "pool": "prior",
+  "streams": 1844,
+  "guard2": true,
+  "n": 200,
+  "accept": 0.16286644951140064
+ },
+ {
+  "name": "PGC430221",
+  "pool": "prior",
+  "streams": 1442,
+  "guard2": true,
+  "n": 200,
+  "accept": 0.2777777777777778
+ },
+ {
+  "name": "PGC938075",
+  "pool": "prior",
+  "streams": 290,
+  "guard2": true,
+  "n": 200,
+  "accept": 0.039912193175014966
+ },
+ {
+  "name": "UGC01245",
+  "pool": "prior",
+  "streams": 3034,
+  "guard2": true,
+  "n": 200,
+  "accept": 0.3663003663003663
+ },
+ {
+  "name": "UGC01424",
+  "pool": "prior",
+  "streams": 751,
+  "guard2": true,
+  "n": 200,
+  "accept": 0.08149959250203749
+ },
+ {
+  "name": "UGC01970",
+  "pool": "prior",
+  "streams": 877,
+  "guard2": true,
+  "n": 200,
+  "accept": 0.09474182851729038
+ },
+ {
+  "name": "UGC08717",
+  "pool": "prior",
+  "streams": 191,
+  "guard2": true,
+  "n": 200,
+  "accept": 0.07331378299120235
+ },
+ {
+  "name": "UGC09239",
+  "pool": "prior",
+  "streams": 1046,
+  "guard2": true,
+  "n": 200,
+  "accept": 0.13531799729364005
+ },
+ {
+  "name": "ESO079-003_GROUP",
+  "pool": "long",
+  "streams": 7860,
+  "guard2": true,
+  "n": 200,
+  "accept": 0.186219739292365
+ },
+ {
+  "name": "ESO298-016",
+  "pool": "long",
+  "streams": 7860,
+  "guard2": true,
+  "n": 200,
+  "accept": 0.47058823529411764
+ },
+ {
+  "name": "ESO356-012",
+  "pool": "long",
+  "streams": 7839,
+  "guard2": true,
+  "n": 200,
+  "accept": 0.5633802816901409
+ },
+ {
+  "name": "IC0120",
+  "pool": "long",
+  "streams": 3983,
+  "guard2": true,
+  "n": 200,
+  "accept": 0.36900369003690037
+ },
+ {
+  "name": "IC1124",
+  "pool": "long",
+  "streams": 7866,
+  "guard2": true,
+  "n": 200,
+  "accept": 0.8064516129032258
+ },
+ {
+  "name": "IC1657_GROUP",
+  "pool": "long",
+  "streams": 7056,
+  "guard2": true,
+  "n": 200,
+  "accept": 0.477326968973747
+ },
+ {
+  "name": "NGC0804",
+  "pool": "long",
+  "streams": 3401,
+  "guard2": true,
+  "n": 200,
+  "accept": 0.11983223487118035
+ },
+ {
+  "name": "NGC1162",
+  "pool": "long",
+  "streams": 7056,
+  "guard2": true,
+  "n": 200,
+  "accept": 0.19083969465648856
+ },
+ {
+  "name": "NGC2769",
+  "pool": "long",
+  "streams": 7860,
+  "guard2": true,
+  "n": 200,
+  "accept": 0.5128205128205128
+ },
+ {
+  "name": "NGC3041",
+  "pool": "long",
+  "streams": 7866,
+  "guard2": true,
+  "n": 200,
+  "accept": 0.5449591280653951
+ },
+ {
+  "name": "NGC4256_GROUP",
+  "pool": "long",
+  "streams": 6275,
+  "guard2": true,
+  "n": 200,
+  "accept": 0.09985022466300549
+ },
+ {
+  "name": "NGC4388_GROUP",
+  "pool": "long",
+  "streams": 7861,
+  "guard2": true,
+  "n": 200,
+  "accept": 0.5420054200542005
+ },
+ {
+  "name": "NGC4632",
+  "pool": "long",
+  "streams": 7854,
+  "guard2": true,
+  "n": 200,
+  "accept": 0.546448087431694
+ },
+ {
+  "name": "NGC4686",
+  "pool": "long",
+  "streams": 7861,
+  "guard2": true,
+  "n": 200,
+  "accept": 0.6472491909385113
+ },
+ {
+  "name": "NGC5055_GROUP",
+  "pool": "long",
+  "streams": 7854,
+  "guard2": true,
+  "n": 200,
+  "accept": 0.41841004184100417
+ },
+ {
+  "name": "NGC5263",
+  "pool": "long",
+  "streams": 6615,
+  "guard2": true,
+  "n": 200,
+  "accept": 0.44642857142857145
+ },
+ {
+  "name": "NGC5387",
+  "pool": "long",
+  "streams": 7834,
+  "guard2": true,
+  "n": 200,
+  "accept": 0.684931506849315
+ },
+ {
+  "name": "NGC5513_GROUP",
+  "pool": "long",
+  "streams": 7850,
+  "guard2": true,
+  "n": 200,
+  "accept": 0.4032258064516129
+ },
+ {
+  "name": "NGC5907",
+  "pool": "long",
+  "streams": 7822,
+  "guard2": true,
+  "n": 200,
+  "accept": 0.4784688995215311
+ },
+ {
+  "name": "PGC000902",
+  "pool": "long",
+  "streams": 5941,
+  "guard2": true,
+  "n": 200,
+  "accept": 0.36900369003690037
+ },
+ {
+  "name": "PGC006791",
+  "pool": "long",
+  "streams": 7866,
+  "guard2": true,
+  "n": 200,
+  "accept": 0.5698005698005698
+ },
+ {
+  "name": "PGC039258",
+  "pool": "long",
+  "streams": 7569,
+  "guard2": true,
+  "n": 200,
+  "accept": 0.5449591280653951
+ },
+ {
+  "name": "PGC1001085",
+  "pool": "long",
+  "streams": 2567,
+  "guard2": true,
+  "n": 200,
+  "accept": 0.2336448598130841
+ },
+ {
+  "name": "PGC1092512",
+  "pool": "long",
+  "streams": 5941,
+  "guard2": true,
+  "n": 200,
+  "accept": 0.2728512960436562
+ },
+ {
+  "name": "PGC3092153",
+  "pool": "long",
+  "streams": 7844,
+  "guard2": true,
+  "n": 200,
+  "accept": 0.49627791563275436
+ },
+ {
+  "name": "PGC430221",
+  "pool": "long",
+  "streams": 7828,
+  "guard2": true,
+  "n": 200,
+  "accept": 0.6172839506172839
+ },
+ {
+  "name": "PGC938075",
+  "pool": "long",
+  "streams": 3200,
+  "guard2": true,
+  "n": 200,
+  "accept": 0.21344717182497333
+ },
+ {
+  "name": "UGC01245",
+  "pool": "long",
+  "streams": 7866,
+  "guard2": true,
+  "n": 200,
+  "accept": 0.6644518272425249
+ },
+ {
+  "name": "UGC01424",
+  "pool": "long",
+  "streams": 7569,
+  "guard2": true,
+  "n": 200,
+  "accept": 0.3992015968063872
+ },
+ {
+  "name": "UGC01970",
+  "pool": "long",
+  "streams": 7759,
+  "guard2": true,
+  "n": 200,
+  "accept": 0.38022813688212925
+ },
+ {
+  "name": "UGC08717",
+  "pool": "long",
+  "streams": 2355,
+  "guard2": true,
+  "n": 200,
+  "accept": 0.31201248049922
+ },
+ {
+  "name": "UGC09239",
+  "pool": "long",
+  "streams": 7810,
+  "guard2": true,
+  "n": 200,
+  "accept": 0.5194805194805194
+ }
+]
