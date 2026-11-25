@@ -20,3 +20,6 @@ outputs/**/models/
 # nested-sampling checkpoints and raw results (large, regenerable)
 outputs/**/nested/**/checkpoint.save
 outputs/**/nested/**/result.npz
+
+# numpy archives (results tables; regenerable from the scripts)
+*.npz

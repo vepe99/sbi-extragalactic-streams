@@ -1,0 +1,101 @@
+# Gibbons-ordering twin of npe_v2_long90k_tf96x3_scaleaug.yaml (asked by Giuseppe on 2026-11-25): the same model and
+# training settings, with `ordering: gibbons14` (the ordering of Chemaly et al. 2026b, StreaMAX get_stream_ordered,
+# stored as track_alt/) and the long streams taken from train_v2_long90k_both, which is train_v2_long90k simulated
+# again (same 644,256 streams, same seed 90) with both orderings stored. Only `name`, `ordering` and `replace_tracks`
+# differ from that file.
+# CAUTION: the long streams were chosen on their C26 tracks (selection.npz of train_v2_long90k). The training only
+# swaps tracks and is not affected; the evaluations that simulate posterior draws (predictive.more_particles,
+# data.chosen_for_replacement) apply that rule to the tracks of `ordering`, i.e. to Gibbons tracks here, which does
+# not pick quite the same streams. Recovery / calibration / contraction with `ppc_tracks: 0` and nll.py are not affected.
+#
+# (Header of the original file:)
+# SBI run on train_v2 with its long streams at 90,000 particles: affine coupling flow, a summary transformer a bit
+# larger than usual (embed_dim 96 and 3 blocks in place of 64 and 2), scale augmentation on, 1000 epochs (asked by
+# Giuseppe on 2026-11-25). It is npe_v2_long90k_tf96x3_scaleaug.yaml with `replace_tracks`, `scale_aug`, `embed_dim`, `n_blocks`
+# and the name changed; the flow (8 x 512) and the training settings are the same.
+# Why these sizes: the run with a transformer of 128 x 4 and a flow of 12 x 1024 on train_v2 reached 11.29 at epoch
+# 57 and overfitted from there (12.5 by epoch 450). The augmentation is on because in the MLP pair on this set
+# (npe_v2_long90k.yaml, npe_v2_long90k_scaleaug.yaml) it stopped the overfitting.
+#
+#   uv run --extra gpu python scripts/extragalactic/sbi/train.py           --config outputs/extragalactic/C26_test/npe_v2_long90k_tf96x3_scaleaug_g14.yaml
+#   uv run --extra gpu python scripts/extragalactic/sbi/evaluation.py      --config outputs/extragalactic/C26_test/npe_v2_long90k_tf96x3_scaleaug_g14.yaml
+#   uv run --extra gpu python scripts/extragalactic/sbi/evaluation_real.py --config outputs/extragalactic/C26_test/npe_v2_long90k_tf96x3_scaleaug_g14.yaml
+#
+# Paths are relative to the repository root. Every field of Config (scripts/extragalactic/sbi/config.py) can be
+# set here; the ones left out keep their defaults. Results go to outputs/extragalactic/C26_test/models/<name>/.
+
+name: npe_coupling_tf96x3_long90k_scaleaug_1000epoch_vr4_5e4lr_g14
+
+# --- data
+out: outputs/extragalactic/C26_test
+subdir: train_v2            # the whole set: 2000 shards, 10,000,000 streams (leapfrog), complete on 2026-11-24 01:13
+replace_tracks: train_v2_long90k_both  # the 644,256 long streams of train_v2 (resolved orbit, a run of >= 26 bins with enough
+                            # particles) simulated again with 90,000 particles: their tracks take the place of the stored ones
+ordering: gibbons14         # c26 | gibbons14 (the ordering of 2026b, stored as track_alt/)
+val_frac: 0.1               # the last 10 % of the usable streams are held out
+n_val: 600000               # fixed mock tracks of the held-out streams, the validation set
+
+# --- mock observations (the augmentation)
+n_min: 10                   # model particles a bin needs (guard 1 of 2026b) at 30,000 particles; 30 for the streams with 90,000
+var_ratio: 4.0              # model variance <= data variance / 4 (guard 2); 0 = off
+span_max: 49                # longest mock track in bins (= tokens); the longest observed track spans 49
+p_known: 0.0                # progenitor position never given to the network: inferred as a nuisance parameter
+sig_sys_max: 5.0            # kpc; sigma_sys ~ U(0, sig_sys_max)
+scale_aug: true             # scale augmentation of the training examples (mock.py): every example at its own (L, U), lengths x L
+                            # and masses x U, drawn from the prior along that family; the track x L. The validation mocks are not scaled
+scale_points: 256           # points of the (ln L, ln U) plane each draw chooses among
+
+# --- networks
+inference: flow             # flow | diffusion | flow_matching
+transform: affine           # the coupling flow's transform: affine (scale and shift) | spline
+backbone: mlp               # for diffusion / flow_matching: mlp | transformer
+depth: 8                    # coupling layers
+width: 512
+flow_layers: 2              # hidden layers of the MLP in each coupling layer
+summary: transformer        # transformer | timeseries | mlp; the transformer takes the padding mask (missing bins, shorter tracks)
+summary_dim: 64
+embed_dim: 96               # (64 in the usual run, 128 in the large one)
+n_blocks: 3                 # (2; 4)
+n_heads: 4                  # must divide embed_dim
+dropout: 0.05
+standardize: all            # BayesFlow's standardisation: none | all | list of inference_variables, summary_variables, inference_conditions
+
+# --- training
+epochs: 1000
+batch_size: 4096
+lr: 0.0005
+seed: 2607
+cpu: false                  # false = take a free GPU with autocvd
+data_on_device: true        # training set on the GPU, batches made there
+
+# --- evaluation.py (mock tracks of held-out streams)
+# CAUTION: the predictive check and the importance weights simulate posterior draws with the particle number of
+# `subdir` (30,000) and guard 1 at `n_min`. The long streams of this set have 90,000 particles and guard 1 at 30,
+# so for them that likelihood is not the one the network was trained on. Recovery, calibration and contraction
+# (`ppc_tracks: 0`) and scripts/extragalactic/sbi/nll.py do not simulate and are not affected.
+n_test: 1000                # mock tracks for recovery, calibration, contraction
+n_samples: 1000             # posterior draws per track
+length_edges: [12, 25]      # recovery, calibration and contraction also per length class: short 6-12 bins, medium 13-25, long 26-49
+ppc_tracks: 32              # mock tracks in the posterior predictive check
+ppc_draws: 1000             # posterior draws per track that are simulated again and importance weighted (also for
+                            # evaluation_real.py); = n_samples: every draw is weighted
+
+# --- evaluation_real.py (observed STRRINGS tracks)
+real_tracks: ""             # "" = all 32, or e.g. NGC5907,NGC1162
+importance: true            # importance weights with the likelihood of 2026b (prior x likelihood / q)
+prog_given: false           # true needs p_known > 0 at training
+
+# --- simulations of posterior draws (generate.py, same integrator as the training set; on the GPU the
+#     evaluation holds plus the free ones. sim_device: cpu puts them on sim_workers CPU processes)
+sim_workers: 16             # most GPUs (or CPU processes) used
+sim_cores: ""               # CPU only: e.g. 0-15 to pin the processes
+
+# --- nested.py (dynesty on the tracks named with --real-tracks; results in <out>/nested/<track>/). It samples
+#     the posterior this file defines: prior and simulator of `subdir`, `ordering`, `n_min`, `var_ratio`,
+#     `sig_sys_max`, progenitor position inferred. The network settings play no part, so every file with the
+#     same values of those shares one nested run, and corner.png compares it with the network of `name`
+ns_gpus: 4                  # free GPUs, one worker each
+ns_batch: 128               # streams per GPU and call
+ns_nlive: 2000              # live points; with ns_sample and ns_neff the "paper" preset of StreaMAX-fit
+ns_sample: rslice
+ns_neff: 10000              # effective posterior samples at which the run ends

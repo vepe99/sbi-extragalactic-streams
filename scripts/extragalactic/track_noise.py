@@ -64,13 +64,14 @@ def stream_table(cfg: Config, workers: int) -> dict:
                 L=d["L"][keep], unbound=unbound[keep], nonmono=((d["status"] & 32) > 0)[keep], row=np.flatnonzero(keep))  # fmt: skip
 
 
-def simulate(theta, dissolved, sc: dict, cfg: Config, out: Path, seed: int, batch: int = 0, cpu_workers: int = 0, cpu_cores: str = "", gpus: str = "") -> dict:
+def simulate(theta, dissolved, sc: dict, cfg: Config, out: Path, seed: int, batch: int = 0, cpu_workers: int = 0, cpu_cores: str = "", gpus: str = "", alt_ordering: bool = False) -> dict:
     """generate.py on given parameters with the master key `seed` (stream k uses fold_in(key(seed), k)), on the
     card this process holds. As `predictive.simulate`, plus the seed. batch: streams at once (0 = generate.py's
     memory probe, which assumes the card is its own). cpu_workers > 0: on that many CPU processes instead; give them
     `cpu_cores` (e.g. "32-63,160-191") to share out, or every process starts a thread for every core of the machine.
     gpus: cards (comma-separated UUIDs or indices, each checked to be free by the caller) for one generate.py worker
-    each, instead of the single card this process holds."""
+    each, instead of the single card this process holds. alt_ordering: also store the track in the other ordering
+    (track_alt/), as train_v2 does."""
     from predictive import read_tracks
 
     out.mkdir(parents=True, exist_ok=True)
@@ -84,7 +85,7 @@ def simulate(theta, dissolved, sc: dict, cfg: Config, out: Path, seed: int, batc
                  else ["--gpus", gpus or os.environ["CUDA_VISIBLE_DEVICES"], "--shard-size", "1024"])
         cmd = ["uv", "run", "--script", str(REPO / "scripts/extragalactic/generate.py"), "run", *([] if same else ["--overwrite"]), *where,
                "--theta-file", str(out / "theta.npz"), "--n-streams", str(len(theta)), "--n-save-particles", "0",
-               "--out", str(out.relative_to(REPO)), "--track-ordering", cfg.ordering, "--progenitor-mass-loss", "mixed", "--seed", str(seed), *physics, *(["--batch-size", str(batch)] if batch else [])]  # fmt: skip
+               "--out", str(out.relative_to(REPO)), "--track-ordering", cfg.ordering, "--progenitor-mass-loss", "mixed", "--seed", str(seed), *physics, *(["--alt-ordering"] if alt_ordering else []), *(["--batch-size", str(batch)] if batch else [])]  # fmt: skip
         print(f"simulating {len(theta)} streams -> {out.name}", flush=True)
         with open(out / "generate.log", "w") as log:
             subprocess.run(cmd, check=True, stdout=log, stderr=subprocess.STDOUT)

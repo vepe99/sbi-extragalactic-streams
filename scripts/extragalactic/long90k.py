@@ -173,6 +173,7 @@ def main() -> None:
     ap.add_argument("--batch", type=int, default=32, help="streams at once on a GPU (0 = generate.py's memory probe)")
     ap.add_argument("--cpu-workers", type=int, default=0, help="simulate on this many CPU processes instead (no free GPU)")
     ap.add_argument("--cpu-cores", default="", help="cores the CPU processes share out, e.g. 32-63,160-191; give them, or each process uses the whole machine")
+    ap.add_argument("--alt-ordering", action="store_true", help="also store the track in the other ordering (track_alt/; c26 and gibbons14 both, as in train_v2)")
     ap.add_argument("--n-check", type=int, default=20000)
     ap.add_argument("--loader-shards", type=int, default=100, help="--check: shards of the set that load_simulations reads with and without the new tracks")
     ap.add_argument("--workers", type=int, default=24, help="processes that read the shards of the set")
@@ -200,13 +201,13 @@ def main() -> None:
     if not a.full:
         s = np.sort(np.random.default_rng(cfg.seed + 1).choice(n, min(a.pilot, n), replace=False))
         t0 = time.time()
-        r = TN.simulate(theta[s], dis[s], sc, cfg, out / "pilot", a.seed, **where)
+        r = TN.simulate(theta[s], dis[s], sc, cfg, out / "pilot", a.seed, alt_ordering=a.alt_ordering, **where)
         rate = rate_of(out / "pilot")
         print(json.dumps(dict(pilot_streams=len(s), wall_s=round(time.time() - t0, 1), **rate, negative_counts=int((r["count"] < 0).sum()), failed=float(r["failed"].mean()),
                               full_run_hours=round(n / rate["rate"] / 3600, 2)), indent=1))  # fmt: skip
         return
     t0 = time.time()
-    TN.simulate(theta, dis, sc, cfg, out, a.seed, **where)
+    TN.simulate(theta, dis, sc, cfg, out, a.seed, alt_ordering=a.alt_ordering, **where)
     print(f"done in {(time.time() - t0) / 3600:.2f} h; rate {rate_of(out)['rate']:.1f} streams per second", flush=True)
 
 
